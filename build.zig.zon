@@ -1,0 +1,6 @@
+.{
+    .name = "zig-usbhid",
+    .version = "0.0.1",
+    .paths = .{""},
+    .dependencies = .{},
+}
