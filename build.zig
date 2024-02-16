@@ -9,11 +9,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .path = "src/hidapi.zig" },
     });
 
-    // hidapi.linkLibC();
-    // hidapi.linkSystemLibrary("hidapi-libusb");
-
-    // b.installArtifact(hidapi);
-
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/hidapi.zig" },
         .target = target,
