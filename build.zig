@@ -6,11 +6,11 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     _ = b.addModule("hidapi", .{
-        .root_source_file = .{ .path = "src/hidapi.zig" },
+        .root_source_file = b.path("src/hidapi.zig"),
     });
 
     const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/hidapi.zig" },
+        .root_source_file = b.path("src/hidapi.zig"),
         .target = target,
         .optimize = optimize,
     });

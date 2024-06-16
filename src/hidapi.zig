@@ -298,7 +298,7 @@ pub const Device = struct {
         var buffer: [128]hidapi.wchar_t = undefined;
         const result = hidapi.hid_get_manufacturer_string(self.device, &buffer, buffer.len);
         if (result < 0) return error.HIDApiError;
-        return try from_wchar_alloc(alloc, &buffer);
+        return (try from_wchar_alloc(alloc, &buffer)) orelse return error.HIDApiError;
     }
 
     /// Get The Product String from a HID device.
@@ -306,7 +306,7 @@ pub const Device = struct {
         var buffer: [128]hidapi.wchar_t = undefined;
         const result = hidapi.hid_get_product_string(self.device, &buffer, buffer.len);
         if (result < 0) return error.HIDApiError;
-        return try from_wchar_alloc(alloc, &buffer);
+        return (try from_wchar_alloc(alloc, &buffer)) orelse return error.HIDApiError;
     }
 
     /// Get The Serial Number String from a HID device.

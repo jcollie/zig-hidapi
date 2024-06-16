@@ -1,9 +1,9 @@
 {
-  description = "zig-usbnhid";
+  description = "zig-hidapi";
 
   inputs = {
     nixpkgs = {
-      url = "nixpkgs/nixos-unstable";
+      url = "nixpkgs/nixos-unstable-small";
     };
     flake-utils = {
       url = "github:numtide/flake-utils";
@@ -11,9 +11,9 @@
     make-shell = {
       url = "github:ursi/nix-make-shell";
     };
-    zig = {
-      url = "github:mitchellh/zig-overlay";
-    };
+    # zig = {
+    #   url = "github:mitchellh/zig-overlay";
+    # };
     # zls = {
     #   url = "github:zigtools/zls";
     #   inputs.nixpkgs.follows = "nixpkgs";
@@ -23,7 +23,6 @@
   };
 
   outputs = {
-    self,
     nixpkgs,
     flake-utils,
     ...
@@ -35,9 +34,9 @@
       #   }
       # )
     ];
-    systems = builtins.attrNames inputs.zig.packages;
+    # systems = builtins.attrNames inputs.zig.packages;
   in
-    flake-utils.lib.eachSystem systems (
+    flake-utils.lib.eachDefaultSystem (
       system: let
         pkgs = import nixpkgs {
           inherit overlays system;
@@ -46,7 +45,8 @@
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = [
             pkgs.hidapi
-            inputs.zig.packages.${system}.master
+            pkgs.zig_0_13
+            # inputs.zig.packages.${system}.master
             # inputs.zls.packages.${system}.zls
           ];
           buildInputs = [
