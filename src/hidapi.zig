@@ -4,6 +4,11 @@ const hidapi = @cImport({
     @cInclude("hidapi/hidapi.h");
 });
 
+const Errors = error{
+    HidApiInitError,
+    HidApiExitError,
+};
+
 const MAX_REPORT_DESCRIPTOR_SIZE = hidapi.HID_API_MAX_REPORT_DESCRIPTOR_SIZE;
 
 const HidBusType = enum(hidapi.hid_bus_type) {
@@ -15,12 +20,12 @@ const HidBusType = enum(hidapi.hid_bus_type) {
     _,
 };
 
-pub fn init() !void {
+pub fn init() error.HidApiInitError!void {
     const ret = hidapi.hid_init();
     if (ret != 0) return error.HidApiInitError;
 }
 
-pub fn exit() !void {
+pub fn exit() error.HidApiExitError!void {
     const ret = hidapi.hid_exit();
     if (ret != 0) return error.HidApiExitError;
 }

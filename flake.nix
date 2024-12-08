@@ -5,6 +5,9 @@
     nixpkgs = {
       url = "nixpkgs/nixos-unstable";
     };
+    zig = {
+      url = "github:mitchellh/zig-overlay";
+    };
     flake-utils = {
       url = "github:numtide/flake-utils";
     };
@@ -13,8 +16,9 @@
   outputs = {
     nixpkgs,
     flake-utils,
+    zig,
     ...
-  } @ inputs: let
+  }: let
   in
     flake-utils.lib.eachDefaultSystem (
       system: let
@@ -25,7 +29,7 @@
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = [
             pkgs.hidapi
-            pkgs.zig_0_13
+            zig.packages.${system}.master
           ];
           buildInputs = [
             pkgs.hidapi
