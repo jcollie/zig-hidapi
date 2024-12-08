@@ -3,23 +3,11 @@
 
   inputs = {
     nixpkgs = {
-      url = "nixpkgs/nixos-unstable-small";
+      url = "nixpkgs/nixos-unstable";
     };
     flake-utils = {
       url = "github:numtide/flake-utils";
     };
-    make-shell = {
-      url = "github:ursi/nix-make-shell";
-    };
-    # zig = {
-    #   url = "github:mitchellh/zig-overlay";
-    # };
-    # zls = {
-    #   url = "github:zigtools/zls";
-    #   inputs.nixpkgs.follows = "nixpkgs";
-    #   inputs.zig-overlay.follows = "zig";
-    #   inputs.flake-utils.follows = "flake-utils";
-    # };
   };
 
   outputs = {
@@ -27,27 +15,17 @@
     flake-utils,
     ...
   } @ inputs: let
-    overlays = [
-      # (
-      #   final: prev: {
-      #     zigpkgs = inputs.zig.packages.${prev.system};
-      #   }
-      # )
-    ];
-    # systems = builtins.attrNames inputs.zig.packages;
   in
     flake-utils.lib.eachDefaultSystem (
       system: let
         pkgs = import nixpkgs {
-          inherit overlays system;
+          inherit system;
         };
       in {
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = [
             pkgs.hidapi
             pkgs.zig_0_13
-            # inputs.zig.packages.${system}.master
-            # inputs.zls.packages.${system}.zls
           ];
           buildInputs = [
             pkgs.hidapi
