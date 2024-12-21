@@ -27,6 +27,7 @@
         };
       in {
         devShells.default = pkgs.mkShell {
+          name = "zig-hidapi";
           nativeBuildInputs = [
             pkgs.hidapi
             zig.packages.${system}.master
@@ -37,9 +38,6 @@
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
             pkgs.hidapi
           ];
-          shellHook = ''
-            name="zig-hidapi"
-          '';
         };
         packages.default = pkgs.zigStdenv.mkDerivation {
           pname = "zig-hidapi";
