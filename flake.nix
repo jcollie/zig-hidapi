@@ -5,11 +5,13 @@
     nixpkgs = {
       url = "nixpkgs/nixos-unstable";
     };
-    zig = {
-      url = "github:mitchellh/zig-overlay";
-    };
     flake-utils = {
       url = "github:numtide/flake-utils";
+    };
+    zig = {
+      url = "github:mitchellh/zig-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "flake-utils";
     };
   };
 
