@@ -20,12 +20,20 @@ const HidBusType = enum(hidapi.hid_bus_type) {
     _,
 };
 
-pub fn init() error.HidApiInitError!void {
+pub const HidApiInitErrors = error{
+    HidApiInitError,
+};
+
+pub fn init() HidApiInitErrors!void {
     const ret = hidapi.hid_init();
     if (ret != 0) return error.HidApiInitError;
 }
 
-pub fn exit() error.HidApiExitError!void {
+pub const HidApiExitErrors = error{
+    HidApiExitError,
+};
+
+pub fn exit() HidApiExitErrors!void {
     const ret = hidapi.hid_exit();
     if (ret != 0) return error.HidApiExitError;
 }
@@ -53,17 +61,17 @@ const DeviceInfo = struct {
 
     pub fn init(alloc: std.mem.Allocator, hid_device_info: [*c]hidapi.hid_device_info) !DeviceInfo {
         return .{
-            .vendor_id = hid_device_info.vendor_id,
-            .product_id = hid_device_info.product_id,
-            .release_number = hid_device_info.release_number,
-            .path = try alloc.dupe(u8, std.mem.span(hid_device_info.path)),
-            .serial_number = try from_wchar_alloc(alloc, hid_device_info.serial_number),
-            .manufacturer = try from_wchar_alloc(alloc, hid_device_info.manufacturer_string),
-            .product = try from_wchar_alloc(alloc, hid_device_info.product_string),
-            .usage_page = hid_device_info.usage_page,
-            .usage = hid_device_info.usage,
-            .interface_number = hid_device_info.interface_number,
-            .bus_type = @enumFromInt(hid_device_info.bus_type),
+            .vendor_id = hid_device_info.*.vendor_id,
+            .product_id = hid_device_info.*.product_id,
+            .release_number = hid_device_info.*.release_number,
+            .path = try alloc.dupe(u8, std.mem.span(hid_device_info.*.path)),
+            .serial_number = try from_wchar_alloc(alloc, hid_device_info.*.serial_number),
+            .manufacturer = try from_wchar_alloc(alloc, hid_device_info.*.manufacturer_string),
+            .product = try from_wchar_alloc(alloc, hid_device_info.*.product_string),
+            .usage_page = hid_device_info.*.usage_page,
+            .usage = hid_device_info.*.usage,
+            .interface_number = hid_device_info.*.interface_number,
+            .bus_type = @enumFromInt(hid_device_info.*.bus_type),
         };
     }
 
@@ -98,34 +106,30 @@ const DeviceInfo = struct {
     }
 };
 
-const DeviceInfos = struct {
-    arena: std.heap.ArenaAllocator,
-    devices: []DeviceInfo,
+pub const DeviceInfoIterator = struct {
+    start: ?*hidapi.hid_device_info,
+    current: ?*hidapi.hid_device_info,
 
-    pub fn deinit(self: @This()) void {
-        for (self.devices) |device| device.deinit();
-        self.arena.deinit();
+    pub fn next(self: *DeviceInfoIterator, alloc: std.mem.Allocator) !?DeviceInfo {
+        if (self.current) |current| {
+            self.current = current.next;
+            return try DeviceInfo.init(alloc, current);
+        }
+        return null;
+    }
+
+    pub fn deinit(self: *DeviceInfoIterator) void {
+        if (self.start) |start| hidapi.hid_free_enumeration(start);
     }
 };
 
-pub fn enumerate(allocator: std.mem.Allocator, vendor_id: c_ushort, product_id: c_ushort) !DeviceInfos {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    errdefer arena.deinit();
-
-    const alloc = arena.allocator();
-
-    var dl = std.ArrayList(DeviceInfo).init(alloc);
-
-    var current: ?*hidapi.hid_device_info = hidapi.hid_enumerate(vendor_id, product_id);
-    defer hidapi.hid_free_enumeration(current);
-
-    while (current) |hid_device_info| : (current = hid_device_info.next) {
-        try dl.append(DeviceInfo.init(alloc, hid_device_info));
-    }
+pub fn enumerate(vendor_id: c_ushort, product_id_: ?c_ushort) !DeviceInfoIterator {
+    const product_id = product_id_ orelse 0x0000;
+    const device_info: ?*hidapi.hid_device_info = hidapi.hid_enumerate(vendor_id, product_id);
 
     return .{
-        .arena = arena,
-        .devices = try dl.toOwnedSlice(),
+        .start = device_info,
+        .current = device_info,
     };
 }
 
@@ -142,7 +146,6 @@ pub fn version() struct { major: c_int, minor: c_int, patch: c_int } {
 
 test "version-1" {
     const v = version();
-    std.debug.print("\n{} {} {}\n", .{ v.major, v.minor, v.patch });
     try std.testing.expectEqual(@as(i32, 0), v.major);
     try std.testing.expectEqual(@as(i32, 14), v.minor);
     try std.testing.expectEqual(@as(i32, 0), v.patch);
@@ -154,7 +157,6 @@ pub fn version_str() []const u8 {
 
 test "version-2" {
     const v = version_str();
-    std.debug.print("\n{s}\n", .{v});
     try std.testing.expectEqualStrings("0.14.0", v);
 }
 
