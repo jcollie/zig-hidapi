@@ -8,17 +8,11 @@
     flake-utils = {
       url = "github:numtide/flake-utils";
     };
-    zig = {
-      url = "github:mitchellh/zig-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-utils.follows = "flake-utils";
-    };
   };
 
   outputs = {
     nixpkgs,
     flake-utils,
-    zig,
     ...
   }: let
   in
@@ -31,8 +25,8 @@
         devShells.default = pkgs.mkShell {
           name = "zig-hidapi";
           nativeBuildInputs = [
+            pkgs.zig_0_14
             pkgs.hidapi
-            zig.packages.${system}.master
           ];
           buildInputs = [
             pkgs.hidapi
@@ -40,12 +34,6 @@
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
             pkgs.hidapi
           ];
-        };
-        packages.default = pkgs.zigStdenv.mkDerivation {
-          pname = "zig-hidapi";
-          version = "0.1.0";
-          buildInputs = [pkgs.hidapi];
-          src = ./.;
         };
       }
     );

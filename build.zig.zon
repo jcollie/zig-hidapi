@@ -1,6 +1,11 @@
 .{
-    .name = "zig-hidapi",
+    .name = .zig_hidapi,
     .version = "0.0.1",
-    .paths = .{""},
+    .fingerprint = 0x6b178366d6299650,
     .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
 }
