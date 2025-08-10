@@ -1,34 +1,51 @@
 const DeviceInfo = @This();
 
 const std = @import("std");
+const log = std.log.scoped(.hidapi);
 
-const hidapi = @import("hidapi.zig");
+const ioctl = @import("ioctl.zig");
 
-vendor_id: c_ushort,
-product_id: c_ushort,
-path: []u8,
-serial_number: ?[]u8,
-release_number: c_ushort,
-manufacturer: ?[]u8,
-product: ?[]u8,
-usage_page: c_ushort,
-usage: c_ushort,
-interface_number: c_int,
-bus_type: hidapi.HidBusType,
+minor: std.os.linux.dev_t,
+vendor_id: u16,
+product_id: u16,
+serial: []const u8,
+buf: [32]u8 = undefined,
 
-pub fn init(alloc: std.mem.Allocator, hid_device_info: [*c]hidapi.c.hid_device_info) !DeviceInfo {
-    return .{
-        .vendor_id = hid_device_info.*.vendor_id,
-        .product_id = hid_device_info.*.product_id,
-        .release_number = hid_device_info.*.release_number,
-        .path = try alloc.dupe(u8, std.mem.span(hid_device_info.*.path)),
-        .serial_number = try hidapi.fromWCharAlloc(alloc, hid_device_info.*.serial_number),
-        .manufacturer = try hidapi.fromWCharAlloc(alloc, hid_device_info.*.manufacturer_string),
-        .product = try hidapi.fromWCharAlloc(alloc, hid_device_info.*.product_string),
-        .usage_page = hid_device_info.*.usage_page,
-        .usage = hid_device_info.*.usage,
-        .interface_number = hid_device_info.*.interface_number,
-        .bus_type = @enumFromInt(hid_device_info.*.bus_type),
+pub fn init(minor: std.os.linux.dev_t) !?DeviceInfo {
+    const fd = fd: {
+        var buf: [std.fs.max_name_bytes]u8 = undefined;
+        const path = try std.fmt.bufPrint(&buf, "/dev/hidraw{d}", .{minor});
+
+        const rc = std.os.linux.open(
+            path,
+            .{
+                .ACCMODE = .RDWR,
+                .APPEND = true,
+                .NONBLOCK = true,
+            },
+            0,
+        );
+        break :fd switch (std.os.linux.E.init(rc)) {
+            .SUCCESS => break :fd @as(std.os.linux.fd_t, @intCast(rc)),
+            .EXIST => return null,
+            .ACCES => return null,
+            else => |e| {
+                log.err("problem: {s} {s}", .{ path, @tagName(e) });
+                return error.OpenError;
+            },
+        };
+    };
+    defer _ = std.os.linux.close(fd);
+    const vendor, const product = info: {
+        var info = std.mem.zeroes(ioctl.hidraw_devinfo);
+        const rc = std.os.linux.ioctl(fd, ioctl.HIDIOCGRAWINFO, @intFromPtr(&info));
+        switch (std.os.linux.E.init(rc)) {
+            .SUCCESS => break :info .{ info.vendor, info.product },
+            else => |e| {
+                log.err("problem: {s}", .{@tagName(e)});
+                return error.HIDError;
+            },
+        }
     };
 }
 
@@ -42,22 +59,22 @@ pub fn init(alloc: std.mem.Allocator, hid_device_info: [*c]hidapi.c.hid_device_i
 //     return d;
 // }
 
-pub fn format(self: *const DeviceInfo, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-    try writer.print("{x:0>4} {x:0>4} {s} '{?s}'\n", .{ self.vendor_id, self.product_id, self.path, self.serial_number });
-    try writer.print("Manufacturer: {?s}\n", .{self.manufacturer});
-    try writer.print("Product:      {?s}\n", .{self.product});
-    try writer.print("Release:      0x{x}\n", .{self.release_number});
-    try writer.print("Interface:    0x{x}\n", .{self.interface_number});
-    try writer.print("Usage (page): 0x{x} (0x{x})\n", .{ self.usage, self.usage_page });
-    try writer.print("Bus type:     {} ({})\n", .{
-        self.bus_type,
-        @intFromEnum(self.bus_type),
-    });
-}
+// pub fn format(self: *const DeviceInfo, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+//     try writer.print("{x:0>4} {x:0>4} {s} '{?s}'\n", .{ self.vendor_id, self.product_id, self.path, self.serial_number });
+//     try writer.print("Manufacturer: {?s}\n", .{self.manufacturer});
+//     try writer.print("Product:      {?s}\n", .{self.product});
+//     try writer.print("Release:      0x{x}\n", .{self.release_number});
+//     try writer.print("Interface:    0x{x}\n", .{self.interface_number});
+//     try writer.print("Usage (page): 0x{x} (0x{x})\n", .{ self.usage, self.usage_page });
+//     try writer.print("Bus type:     {} ({})\n", .{
+//         self.bus_type,
+//         @intFromEnum(self.bus_type),
+//     });
+// }
 
-pub fn deinit(self: *DeviceInfo, alloc: std.mem.Allocator) void {
-    alloc.free(self.path);
-    alloc.free(self.serial_number);
-    alloc.free(self.manufacturer);
-    alloc.free(self.product);
-}
+// pub fn deinit(self: *DeviceInfo, alloc: std.mem.Allocator) void {
+//     alloc.free(self.path);
+//     alloc.free(self.serial_number);
+//     alloc.free(self.manufacturer);
+//     alloc.free(self.product);
+// }

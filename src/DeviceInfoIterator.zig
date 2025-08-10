@@ -5,17 +5,16 @@ const std = @import("std");
 const hidapi = @import("hidapi.zig");
 const DeviceInfo = @import("DeviceInfo.zig");
 
-start: ?*hidapi.c.hid_device_info,
-current: ?*hidapi.c.hid_device_info,
+index: usize = 0,
 
-pub fn next(self: *DeviceInfoIterator, alloc: std.mem.Allocator) !?DeviceInfo {
-    if (self.current) |current| {
-        self.current = current.next;
-        return try DeviceInfo.init(alloc, current);
+pub fn next(self: *DeviceInfoIterator) !?DeviceInfo {
+    var buf: [std.fs.max_name_bytes]u8 = undefined;
+    if (self.index >= 64) return null;
+    while (self.index < 64) {
+        var buf: [std.fs.max_name_bytes]u8 = undefined;
+        try std.fmt.bufPrintZ(&buf, "/dev/hidraw{d}", .{self.index});
     }
     return null;
 }
 
-pub fn deinit(self: *DeviceInfoIterator) void {
-    if (self.start) |start| hidapi.c.hid_free_enumeration(start);
-}
+pub fn deinit(self: *DeviceInfoIterator) void {}
