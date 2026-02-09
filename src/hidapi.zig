@@ -12,15 +12,15 @@ pub const HID_MAX_DESCRIPTOR_SIZE = 4096;
 //     HidApiInitError,
 // };
 
-pub fn enumerate(vendor_id: c_ushort, product_id_: ?c_ushort) !DeviceInfoIterator {
-    // const product_id = product_id_ orelse 0x0000;
-    // const device_info: ?*c.hid_device_info = c.hid_enumerate(vendor_id, product_id);
+// pub fn enumerate(vendor_id: c_ushort, product_id_: ?c_ushort) !DeviceInfoIterator {
+//     // const product_id = product_id_ orelse 0x0000;
+//     // const device_info: ?*c.hid_device_info = c.hid_enumerate(vendor_id, product_id);
 
-    // return .{
-    //     .start = device_info,
-    //     .current = device_info,
-    // };
-}
+//     // return .{
+//     //     .start = device_info,
+//     //     .current = device_info,
+//     // };
+// }
 
 // pub fn fromWCharAlloc(alloc: std.mem.Allocator, wide_string: [*c]const c.wchar_t) !?[]u8 {
 //     if (wide_string == null) return null;

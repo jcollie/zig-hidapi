@@ -8,9 +8,12 @@ const DeviceInfo = @import("DeviceInfo.zig");
 
 fd: std.os.linux.fd_t,
 
-pub fn open(path: []const u8) !Device {
+pub fn open(minor: std.os.linux.dev_t) !Device {
     return .{
         .fd = fd: {
+            var buf: [std.fs.max_name_bytes]u8 = undefined;
+            const path = try std.fmt.bufPrintZ(&buf, "/dev/hidraw{d}", .{minor});
+
             const rc = std.os.linux.open(
                 path,
                 .{
@@ -100,7 +103,7 @@ pub fn getFeatureReport(self: Device, data: []u8) ![]const u8 {
     switch (std.os.linux.E.init(rc)) {
         .SUCCESS => {
             log.info("{} {any}", .{ rc, data[0..rc] });
-            return rc;
+            return data[0..rc];
         },
         else => |e| {
             log.err("problem: {s}", .{@tagName(e)});
@@ -174,7 +177,7 @@ pub fn write(self: Device, data: []const u8) !usize {
 /// The first byte will contain the Report number if the device uses numbered
 /// reports.
 pub fn read(self: Device, data: []u8) ![]const u8 {
-    const rc = std.os.linux.write(self.fd, data.ptr, data.len);
+    const rc = std.os.linux.read(self.fd, data.ptr, data.len);
     switch (std.os.linux.E.init(rc)) {
         .SUCCESS => {
             return data[0..rc];

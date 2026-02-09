@@ -43,10 +43,10 @@ pub const hidraw_report_descriptor = extern struct {
     size: u32,
     value: [HID_MAX_DESCRIPTOR_SIZE]u8,
 
-    pub fn init(size: c_int) hidraw_report_descriptor {
+    pub fn init(size: u32) hidraw_report_descriptor {
         return .{
-            .size = @intCast(size),
-            .value = std.mem.zeroes([HID_MAX_DESCRIPTOR_SIZE]u8),
+            .size = size,
+            .value = @splat(0),
         };
     }
 };

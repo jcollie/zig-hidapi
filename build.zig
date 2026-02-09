@@ -2,21 +2,27 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-
     const optimize = b.standardOptimizeOption(.{});
 
     _ = b.addModule("hidapi", .{
         .root_source_file = b.path("src/hidapi.zig"),
     });
 
-    const unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/hidapi.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
+    const unit_tests = b.addTest(
+        .{
+            .root_module = b.addModule(
+                "tests",
+                .{
+                    .root_source_file = b.path("src/hidapi.zig"),
+                    .target = target,
+                    .optimize = optimize,
+                },
+            ),
+        },
+    );
 
-    unit_tests.linkLibC();
-    unit_tests.linkSystemLibrary("hidapi-libusb");
+    // unit_tests.linkLibC();
+    // unit_tests.linkSystemLibrary("hidapi-libusb");
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 

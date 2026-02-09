@@ -1,20 +1,29 @@
 const DeviceInfo = @This();
 
 const std = @import("std");
-const log = std.log.scoped(.hidapi);
+const log = std.log.scoped(.device_info);
 
 const ioctl = @import("ioctl.zig");
 
+const Descriptor = @import("Descriptor.zig");
+const Device = @import("Device.zig");
+
+/// The minor device number used to access the hidraw device.
 minor: std.os.linux.dev_t,
-vendor_id: u16,
-product_id: u16,
-serial: []const u8,
-buf: [32]u8 = undefined,
+
+/// The vendor ID.
+vendor: u16,
+
+/// The product ID.
+product: u16,
+
+// serial: []const u8,
+// buf: [32]u8 = undefined,
 
 pub fn init(minor: std.os.linux.dev_t) !?DeviceInfo {
     const fd = fd: {
         var buf: [std.fs.max_name_bytes]u8 = undefined;
-        const path = try std.fmt.bufPrint(&buf, "/dev/hidraw{d}", .{minor});
+        const path = try std.fmt.bufPrintZ(&buf, "/dev/hidraw{d}", .{minor});
 
         const rc = std.os.linux.open(
             path,
@@ -29,6 +38,7 @@ pub fn init(minor: std.os.linux.dev_t) !?DeviceInfo {
             .SUCCESS => break :fd @as(std.os.linux.fd_t, @intCast(rc)),
             .EXIST => return null,
             .ACCES => return null,
+            .NOENT => return null,
             else => |e| {
                 log.err("problem: {s} {s}", .{ path, @tagName(e) });
                 return error.OpenError;
@@ -36,6 +46,7 @@ pub fn init(minor: std.os.linux.dev_t) !?DeviceInfo {
         };
     };
     defer _ = std.os.linux.close(fd);
+
     const vendor, const product = info: {
         var info = std.mem.zeroes(ioctl.hidraw_devinfo);
         const rc = std.os.linux.ioctl(fd, ioctl.HIDIOCGRAWINFO, @intFromPtr(&info));
@@ -47,6 +58,57 @@ pub fn init(minor: std.os.linux.dev_t) !?DeviceInfo {
             },
         }
     };
+
+    // const size = size: {
+    //     var size: u32 = 0;
+    //     const rc = std.os.linux.ioctl(fd, ioctl.HIDIOCGRDESCSIZE, @intFromPtr(&size));
+    //     switch (std.os.linux.E.init(rc)) {
+    //         .SUCCESS => break :size size,
+    //         else => |e| {
+    //             log.err("problem: {s}", .{@tagName(e)});
+    //             return error.HIDError;
+    //         },
+    //     }
+    // };
+
+    // log.warn("report size: {d}", .{size});
+
+    // {
+    //     var report: ioctl.hidraw_report_descriptor = .init(size);
+    //     const rc = std.os.linux.ioctl(fd, ioctl.HIDIOCGRDESC, @intFromPtr(&report));
+    //     switch (std.os.linux.E.init(rc)) {
+    //         .SUCCESS => {
+    //             log.warn("got report {d}", .{report.size});
+    //             std.debug.assert(size == report.size);
+    //         },
+    //         else => |e| {
+    //             log.err("problem: {s}", .{@tagName(e)});
+    //             return error.HIDError;
+    //         },
+    //     }
+    // }
+
+    return .{
+        .minor = minor,
+        .vendor = vendor,
+        .product = product,
+    };
+}
+
+pub fn open(self: *const DeviceInfo) !Device {
+    return try Device.open(self.minor);
+}
+
+test "open" {
+    const di: DeviceInfo = try DeviceInfo.init(1) orelse {
+        log.warn("not found", .{});
+        return;
+    };
+    log.warn("{d} {x:0>4} {x:0>4}", .{
+        di.minor,
+        di.vendor,
+        di.product,
+    });
 }
 
 // pub fn open(self: Self) !Device {
