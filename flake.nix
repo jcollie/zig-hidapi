@@ -3,42 +3,44 @@
 
   inputs = {
     nixpkgs = {
-      url = "nixpkgs/nixos-unstable";
-    };
-    flake-utils = {
-      url = "github:numtide/flake-utils";
-    };
-    flake-compat = {
-      url = "github:edolstra/flake-compat";
-      flake = false;
+      url = "https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.xz";
     };
     zig = {
-      url = "github:mitchellh/zig-overlay";
+      url = "git+https://git.ocjtech.us/jeff/zig-overlay.git?ref=main";
       inputs = {
         nixpkgs.follows = "nixpkgs";
-        flake-utils.follows = "flake-utils";
-        flake-compat.follows = "flake-compat";
       };
     };
   };
 
-  outputs = {
-    nixpkgs,
-    flake-utils,
-    zig,
-    ...
-  }: let
-  in
-    flake-utils.lib.eachDefaultSystem (
-      system: let
-        pkgs = import nixpkgs {
+  outputs =
+    {
+      nixpkgs,
+      zig,
+      ...
+    }:
+    let
+      packages =
+        system:
+        import nixpkgs {
           inherit system;
         };
-      in {
-        devShells.default = pkgs.mkShell {
+      forAllSystems =
+        function:
+        nixpkgs.lib.genAttrs [
+          "aarch64-linux"
+          "aarch64-darwin"
+          "x86_64-darwin"
+          "x86_64-linux"
+        ] (system: function (packages system));
+
+    in
+    {
+      devShells = forAllSystems (pkgs: {
+        default = pkgs.mkShell {
           name = "zig-hidapi";
           nativeBuildInputs = [
-            zig.packages.${system}.master
+            zig.packages.${pkgs.stdenv.hostPlatform.system}.master
             # pkgs.zig_0_14
             # pkgs.hidapi
           ];
@@ -49,6 +51,6 @@
           #   # pkgs.hidapi
           # ];
         };
-      }
-    );
+      });
+    };
 }
