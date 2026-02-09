@@ -1,4 +1,8 @@
+// SPDX-FileCopyrightText: © 2024 Jeffrey C. Ollie <jeff@ocjtech.us>
+// SPDX-License-Identifier: MIT
+
 const std = @import("std");
+const linux = std.os.linux;
 
 pub const BUS = enum(u32) {
     PCI = 0x01,
@@ -31,11 +35,11 @@ pub const hidraw_devinfo = extern struct {
     bustype: BUS,
     vendor: u16,
     product: u16,
-};
 
-comptime {
-    std.debug.assert(@sizeOf(hidraw_devinfo) == 8);
-}
+    comptime {
+        std.debug.assert(@sizeOf(hidraw_devinfo) == 8);
+    }
+};
 
 pub const HID_MAX_DESCRIPTOR_SIZE = 4096;
 
@@ -51,15 +55,15 @@ pub const hidraw_report_descriptor = extern struct {
     }
 };
 
-pub const HIDIOCGRDESCSIZE = std.os.linux.IOCTL.IOR('H', 0x01, c_int);
-pub const HIDIOCGRDESC = std.os.linux.IOCTL.IOR('H', 0x02, hidraw_report_descriptor);
-pub const HIDIOCGRAWINFO = std.os.linux.IOCTL.IOR('H', 0x03, hidraw_devinfo);
+pub const HIDIOCGRDESCSIZE = linux.IOCTL.IOR('H', 0x01, c_int);
+pub const HIDIOCGRDESC = linux.IOCTL.IOR('H', 0x02, hidraw_report_descriptor);
+pub const HIDIOCGRAWINFO = linux.IOCTL.IOR('H', 0x03, hidraw_devinfo);
 
 const read = 2;
 const write = 1;
 
 pub fn HIDIOCGRAWNAME(len: usize) u32 {
-    const request: std.os.linux.IOCTL.Request = .{
+    const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x04,
         .dir = read,
@@ -69,7 +73,7 @@ pub fn HIDIOCGRAWNAME(len: usize) u32 {
 }
 
 pub fn HIDIOCGRAWPHYS(comptime len: usize) u32 {
-    const request: std.os.linux.IOCTL.Request = .{
+    const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x05,
         .dir = read,
@@ -79,7 +83,7 @@ pub fn HIDIOCGRAWPHYS(comptime len: usize) u32 {
 }
 
 pub fn HIDIOCSFEATURE(len: usize) u32 {
-    const request: std.os.linux.IOCTL.Request = .{
+    const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x06,
         .dir = read | write,
@@ -89,7 +93,7 @@ pub fn HIDIOCSFEATURE(len: usize) u32 {
 }
 
 pub fn HIDIOCGFEATURE(len: usize) u32 {
-    const request: std.os.linux.IOCTL.Request = .{
+    const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x07,
         .dir = read | write,
@@ -99,7 +103,7 @@ pub fn HIDIOCGFEATURE(len: usize) u32 {
 }
 
 pub fn HIDIOCGRAWUNIQ(comptime len: usize) u32 {
-    const request: std.os.linux.IOCTL.Request = .{
+    const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x08,
         .dir = read,
@@ -109,7 +113,7 @@ pub fn HIDIOCGRAWUNIQ(comptime len: usize) u32 {
 }
 
 pub fn HIDIOCSINPUT(comptime len: usize) u32 {
-    const request: std.os.linux.IOCTL.Request = .{
+    const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x09,
         .dir = read | write,
@@ -119,7 +123,7 @@ pub fn HIDIOCSINPUT(comptime len: usize) u32 {
 }
 
 pub fn HIDIOCGINPUT(comptime len: usize) u32 {
-    const request: std.os.linux.IOCTL.Request = .{
+    const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x0A,
         .dir = read | write,
@@ -129,7 +133,7 @@ pub fn HIDIOCGINPUT(comptime len: usize) u32 {
 }
 
 pub fn HIDIOCSOUTPUT(comptime len: usize) u32 {
-    const request: std.os.linux.IOCTL.Request = .{
+    const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x0B,
         .dir = read | write,
@@ -139,7 +143,7 @@ pub fn HIDIOCSOUTPUT(comptime len: usize) u32 {
 }
 
 pub fn HIDIOCGOUTPUT(comptime len: usize) u32 {
-    const request: std.os.linux.IOCTL.Request = .{
+    const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x0C,
         .dir = read | write,

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: © 2024 Jeffrey C. Ollie <jeff@ocjtech.us>
+// SPDX-License-Identifier: MIT
+
 const Descriptor = @This();
 const std = @import("std");
 

@@ -1,11 +1,15 @@
+// SPDX-FileCopyrightText: © 2024 Jeffrey C. Ollie <jeff@ocjtech.us>
+// SPDX-License-Identifier: MIT
+
 .{
     .name = .zig_hidapi,
-    .version = "0.0.1",
+    .version = "0.0.2",
     .fingerprint = 0x6b178366d6299650,
     .dependencies = .{},
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
+        "LICENSES",
     },
 }

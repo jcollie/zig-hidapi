@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: © 2024 Jeffrey C. Ollie <jeff@ocjtech.us>
+# SPDX-License-Identifier: MIT
+
 {
   description = "zig-hidapi";
 
@@ -41,6 +44,8 @@
           name = "zig-hidapi";
           nativeBuildInputs = [
             zig.packages.${pkgs.stdenv.hostPlatform.system}.master
+            pkgs.pinact
+            pkgs.reuse
             # pkgs.zig_0_14
             # pkgs.hidapi
           ];
