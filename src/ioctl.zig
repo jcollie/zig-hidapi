@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: © 2024 Jeffrey C. Ollie <jeff@ocjtech.us>
 // SPDX-License-Identifier: MIT
 
+// See https://docs.kernel.org/hid/hidraw.html
+
 const std = @import("std");
 const linux = std.os.linux;
 
