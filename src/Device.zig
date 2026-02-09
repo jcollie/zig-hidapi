@@ -14,143 +14,189 @@ const DeviceInfo = @import("DeviceInfo.zig");
 minor: linux.dev_t,
 fd: linux.fd_t,
 
-pub fn open(minor: linux.dev_t) !Device {
+pub fn open(io: std.Io, minor: linux.dev_t) !Device {
     return .{
         .minor = minor,
         .fd = fd: {
-            var buf: [std.fs.max_name_bytes]u8 = undefined;
-            const path = try std.fmt.bufPrintZ(&buf, "/dev/hidraw{d}", .{minor});
-
-            const rc = linux.open(
-                path,
-                .{
-                    .ACCMODE = .RDWR,
-                    .APPEND = true,
-                    .NONBLOCK = true,
-                },
-                0,
-            );
-            break :fd switch (linux.errno(rc)) {
-                .SUCCESS => @as(linux.fd_t, @intCast(rc)),
-                .ACCES => return error.HIDDeviceNoAccess,
-                .NOENT => return error.HIDDeviceDoesNotExist,
-                else => {
-                    return error.HIDDeviceUnknownOpenError;
-                },
-            };
+            var p = try io.concurrent(_open, .{minor});
+            defer _ = p.cancel(io) catch {};
+            break :fd try p.await(io);
         },
     };
 }
 
-pub fn close(self: Device) void {
-    _ = linux.close(self.fd);
+fn _open(minor: linux.dev_t) !linux.fd_t {
+    var buf: [std.fs.max_name_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrintZ(&buf, "/dev/hidraw{d}", .{minor});
+
+    const rc = linux.open(
+        path,
+        .{
+            .ACCMODE = .RDWR,
+            .APPEND = true,
+            .NONBLOCK = false,
+        },
+        0,
+    );
+    return switch (linux.errno(rc)) {
+        .SUCCESS => @as(linux.fd_t, @intCast(rc)),
+        .ACCES => return error.HIDDeviceNoAccess,
+        .NOENT => return error.HIDDeviceDoesNotExist,
+        else => {
+            return error.HIDDeviceUnknownOpenError;
+        },
+    };
 }
 
-pub fn getReportDescriptorSize(self: Device) !u32 {
+pub fn close(self: Device, io: std.Io) void {
+    var p = io.concurrent(_close, .{self.fd}) catch return;
+    defer p.cancel(io);
+    p.await(io);
+}
+
+fn _close(fd: linux.fd_t) void {
+    _ = linux.close(fd);
+}
+
+pub fn getReportDescriptorSize(self: Device, io: std.Io) !u32 {
     var report_descriptor_size: u32 = 0;
-    const rc = linux.ioctl(self.fd, ioctl.HIDIOCGRDESCSIZE, @intFromPtr(&report_descriptor_size));
-    switch (linux.errno(rc)) {
-        .SUCCESS => {
+    const rc = try ioctl.ioctl(
+        io,
+        self.fd,
+        ioctl.HIDIOCGRDESCSIZE,
+        @intFromPtr(&report_descriptor_size),
+    );
+    switch (rc) {
+        .success => {
             return report_descriptor_size;
         },
-        else => |e| {
+        .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
             return error.HIDError;
         },
     }
 }
 
-pub fn getReportDescriptor(self: Device) !void {
+pub fn getReportDescriptor(self: Device, io: std.Io, buf: []u8) ![]const u8 {
     const size = try self.getReportDescriptorSize();
+    if (buf.len < size) return error.BufferTooSmall;
     var report_descriptor: ioctl.hidraw_report_descriptor = .init(size);
-    const rc = linux.ioctl(self.fd, ioctl.HIDIOCGRDESC, @intFromPtr(&report_descriptor));
-    switch (linux.errno(rc)) {
-        .SUCCESS => {
-            return;
+    const rc = try ioctl.ioctl(
+        io,
+        self.fd,
+        ioctl.HIDIOCGRDESC,
+        @intFromPtr(&report_descriptor),
+    );
+    switch (rc) {
+        .success => {
+            @memcpy(buf[0..size], report_descriptor.value[0..size]);
+            return buf[0..size];
         },
-        else => |e| {
+        .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
             return error.HIDError;
         },
     }
 }
 
-pub fn getRawName(self: Device, buf: []u8) ![]const u8 {
-    const rc = linux.ioctl(self.fd, ioctl.HIDIOCGRAWNAME(buf.len), @intFromPtr(buf.ptr));
-    switch (linux.errno(rc)) {
-        .SUCCESS => {
-            return std.mem.span(buf);
-        },
-        else => |e| {
+pub fn getRawName(self: Device, io: std.Io, buf: []u8) ![]const u8 {
+    const rc = try ioctl.ioctl(
+        io,
+        self.fd,
+        ioctl.HIDIOCGRAWNAME(buf.len),
+        @intFromPtr(buf.ptr),
+    );
+    switch (rc) {
+        .success => |len| return buf[0..len],
+        .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
             return error.HIDError;
         },
     }
 }
 
-pub fn getPhysicalLocation(self: Device, buf: []u8) ![]const u8 {
-    const rc = linux.ioctl(self.fd, ioctl.HIDIOCGRAWPHYS(buf.len), @intFromPtr(buf.ptr));
-    switch (linux.errno(rc)) {
-        .SUCCESS => {
-            return std.mem.span(buf);
-        },
-        else => |e| {
+pub fn getPhysicalLocation(self: Device, io: std.Io, buf: []u8) ![]const u8 {
+    const rc = try ioctl.ioctl(
+        io,
+        self.fd,
+        ioctl.HIDIOCGRAWPHYS(buf.len),
+        @intFromPtr(buf.ptr),
+    );
+    switch (rc) {
+        .success => |len| return buf[0..len],
+        .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
             return error.HIDError;
         },
     }
 }
 
-pub fn getDeviceInfo(self: Device) !DeviceInfo {
+pub fn getDeviceInfo(self: Device, io: std.Io) !DeviceInfo {
     var info = std.mem.zeroes(ioctl.hidraw_devinfo);
-    const rc = linux.ioctl(self.fd, ioctl.HIDIOCGRAWINFO, @intFromPtr(&info));
-    switch (linux.errno(rc)) {
-        .SUCCESS => {
+    const rc = try ioctl.ioctl(
+        io,
+        self.fd,
+        ioctl.HIDIOCGRAWINFO,
+        @intFromPtr(&info),
+    );
+    switch (rc) {
+        .success => {
             return DeviceInfo.init(self.minor, &info);
         },
-        else => |e| {
+        .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
             return error.HIDError;
         },
     }
 }
 
-pub fn getBusType(self: Device) !ioctl.BUS {
+pub fn getBusType(self: Device, io: std.Io) !ioctl.BUS {
     var info = std.mem.zeroes(ioctl.hidraw_devinfo);
-    const rc = linux.ioctl(self.fd, ioctl.HIDIOCGRAWINFO, @intFromPtr(&info));
-    switch (linux.errno(rc)) {
-        .SUCCESS => {
-            return info.bustype;
-        },
-        else => |e| {
+    const rc = ioctl.ioctl(
+        io,
+        self.fd,
+        ioctl.HIDIOCGRAWINFO,
+        @intFromPtr(&info),
+    );
+    switch (rc) {
+        .success => return info.bustype,
+        .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
             return error.HIDError;
         },
     }
 }
 
-pub fn getVendorID(self: Device) !u16 {
+pub fn getVendorID(self: Device, io: std.Io) !u16 {
     var info = std.mem.zeroes(ioctl.hidraw_devinfo);
-    const rc = linux.ioctl(self.fd, ioctl.HIDIOCGRAWINFO, @intFromPtr(&info));
-    switch (linux.errno(rc)) {
-        .SUCCESS => {
+    const rc = ioctl.ioctl(
+        io,
+        self.fd,
+        ioctl.HIDIOCGRAWINFO,
+        @intFromPtr(&info),
+    );
+    switch (rc) {
+        .success => return info.vendor,
+        .failure => |e| {
+            log.warn("problem: {s}", .{@tagName(e)});
+            return error.HIDError;
+        },
+    }
+}
+
+pub fn getProductID(self: Device, io: std.Io) !u16 {
+    var info = std.mem.zeroes(ioctl.hidraw_devinfo);
+    const rc = ioctl.ioctl(
+        io,
+        self.fd,
+        ioctl.HIDIOCGRAWINFO,
+        @intFromPtr(&info),
+    );
+    switch (rc) {
+        .success => {
             return info.vendor;
         },
-        else => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
-}
-
-pub fn getProductID(self: Device) !u16 {
-    var info = std.mem.zeroes(ioctl.hidraw_devinfo);
-    const rc = linux.ioctl(self.fd, ioctl.HIDIOCGRAWINFO, @intFromPtr(&info));
-    switch (linux.errno(rc)) {
-        .SUCCESS => {
-            return info.vendor;
-        },
-        else => |e| {
+        .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
             return error.HIDError;
         },
@@ -169,13 +215,18 @@ pub fn getProductID(self: Device) !u16 {
 /// ID (or 0x0, for devices which do not use numbered reports), followed by
 /// the report data (16 bytes). In this example, the length passed in would
 /// be 17.
-pub fn sendFeatureReport(self: Device, data: []const u8) !usize {
-    const rc = linux.ioctl(self.fd, ioctl.HIDIOCSFEATURE(data.len), @intFromPtr(data.ptr));
-    switch (linux.errno(rc)) {
-        .SUCCESS => {
+pub fn sendFeatureReport(self: Device, io: std.Io, data: []const u8) !usize {
+    const rc = ioctl.ioctl(
+        io,
+        self.fd,
+        ioctl.HIDIOCSFEATURE(data.len),
+        @intFromPtr(data.ptr),
+    );
+    switch (rc) {
+        .success => {
             return rc;
         },
-        else => |e| {
+        .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
             return error.HIDError;
         },
@@ -184,18 +235,20 @@ pub fn sendFeatureReport(self: Device, data: []const u8) !usize {
 
 /// Get a feature report from a HID device.
 ///
-/// Set the first byte of `data` to the Report ID of the report to be read.
-/// Make sure to allow space for this extra byte in `data`. Upon return, the
-/// first byte will still contain the Report ID, and the report data will
-/// start in data[1].
-pub fn getFeatureReport(self: Device, data: []u8) ![]const u8 {
-    const rc = linux.ioctl(self.fd, ioctl.HIDIOCGFEATURE(data.len), @intFromPtr(data.ptr));
-    switch (linux.errno(rc)) {
-        .SUCCESS => {
-            log.info("{} {any}", .{ rc, data[0..rc] });
-            return data[0..rc];
-        },
-        else => |e| {
+/// Set the first byte of `buf` to the Report ID of the report to be read. Make
+/// sure to allow space for this extra byte in `buf`. Upon return, the first
+/// byte will still contain the Report ID, and the report data will start in
+/// buf[1].
+pub fn getFeatureReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
+    const rc = ioctl.ioctl(
+        io,
+        self.fd,
+        ioctl.HIDIOCGFEATURE(buf.len),
+        @intFromPtr(buf.ptr),
+    );
+    switch (rc) {
+        .success => |len| return buf[0..len],
+        .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
             return error.HIDError;
         },
@@ -204,44 +257,50 @@ pub fn getFeatureReport(self: Device, data: []u8) ![]const u8 {
 
 /// Get a input report from a HID device.
 ///
-/// Set the first byte of `data` to the Report ID of the report to be read.
-/// Make sure to allow space for this extra byte in `data`. Upon return, the
-/// first byte will still contain the Report ID, and the report data will
-/// start in `data[1]`.
-pub fn getInputReport(self: Device, data: []u8) ![]const u8 {
-    const rc = linux.ioctl(self.fd, ioctl.HIDIOCGINPUT(data.len), @intFromPtr(data.ptr));
-    switch (linux.errno(rc)) {
-        .SUCCESS => {
-            log.info("{} {any}", .{ rc, data[0..rc] });
-            return rc;
-        },
-        else => |e| {
+/// Set the first byte of `buf` to the report ID of the report to be read. Make
+/// sure to allow space for this extra byte in `buf`. Upon return, the first
+/// byte will still contain the report ID, and the report data will start in
+/// `buf[1]`.
+pub fn getInputReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
+    const rc = ioctl.ioctl(
+        io,
+        self.fd,
+        ioctl.HIDIOCGINPUT(buf.len),
+        @intFromPtr(buf.ptr),
+    );
+    switch (rc) {
+        .success => |len| return buf[0..len],
+        .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
             return error.HIDError;
         },
     }
 }
 
-/// Write an Output report to a HID device.
+/// Write an output report to a HID device.
 ///
-/// The first byte of `data` must contain the Report ID. For
+/// The first byte of `buf` must contain the report ID. For
 /// devices which only support a single report, this must be set
 /// to 0x0. The remaining bytes contain the report data. Since
-/// the Report ID is mandatory, calls to `write()` will always
+/// the report ID is mandatory, calls to `write()` will always
 /// contain one more byte than the report contains. For example,
 /// if a HID report is 16 bytes long, 17 bytes must be passed to
-/// `write()`, the Report ID (or 0x0, for devices with a
+/// `write()`, the report ID (or 0x0, for devices with a
 /// single report), followed by the report data (16 bytes).
 ///
 /// write() will send the data on the first OUT endpoint, if
 /// one exists. If it does not, it will send the data through
 /// the Control Endpoint (Endpoint 0).
-pub fn write(self: Device, data: []const u8) !usize {
-    const rc = linux.write(self.fd, data.ptr, data.len);
+pub fn write(self: Device, io: std.Io, buf: []const u8) !usize {
+    var p = try io.concurrent(_write, .{ self.fd, buf });
+    defer _ = p.cancel(io) catch {};
+    return try p.await(io);
+}
+
+fn _write(fd: linux.fd_t, data: []const u8) !usize {
+    const rc = linux.write(fd, data.ptr, data.len);
     switch (linux.errno(rc)) {
-        .SUCCESS => {
-            return rc;
-        },
+        .SUCCESS => return rc,
         else => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
             return error.HIDError;
@@ -249,13 +308,19 @@ pub fn write(self: Device, data: []const u8) !usize {
     }
 }
 
-/// Read an Input report from a HID device.
+/// Read an input report from a HID device.
 ///
 /// Input reports are returned to the host through the INTERRUPT IN endpoint.
-/// The first byte will contain the Report number if the device uses numbered
+/// The first byte will contain the report number if the device uses numbered
 /// reports.
-pub fn read(self: Device, data: []u8) ![]const u8 {
-    const rc = linux.read(self.fd, data.ptr, data.len);
+pub fn read(self: Device, io: std.Io, data: []u8) ![]const u8 {
+    var p = try io.concurrent(_read, .{ self.fd, data });
+    defer _ = p.cancel(io) catch {};
+    return p.await(io);
+}
+
+fn _read(fd: linux.fd_t, data: []u8) ![]const u8 {
+    const rc = linux.read(fd, data.ptr, data.len);
     switch (linux.errno(rc)) {
         .SUCCESS => {
             return data[0..rc];

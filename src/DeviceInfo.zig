@@ -33,6 +33,6 @@ pub fn init(minor: linux.dev_t, info: *const ioctl.hidraw_devinfo) DeviceInfo {
     };
 }
 
-pub fn open(self: *const DeviceInfo) !Device {
-    return try Device.open(self.minor);
+pub fn open(self: *const DeviceInfo, io: std.Io) !Device {
+    return try Device.open(io, self.minor);
 }

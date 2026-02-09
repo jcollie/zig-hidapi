@@ -16,20 +16,30 @@ index: linux.dev_t = 0,
 
 pub const init: DeviceInfoIterator = .{};
 
-pub fn next(self: *DeviceInfoIterator) !?DeviceInfo {
+pub fn next(self: *DeviceInfoIterator, io: std.Io) !?DeviceInfo {
     if (self.index >= 64) return null;
     while (self.index < 64) {
         defer self.index += 1;
-        const device = Device.open(self.index) catch continue;
-        defer device.close();
-        return device.getDeviceInfo() catch continue;
+        const device = Device.open(io, self.index) catch continue;
+        defer device.close(io);
+        return device.getDeviceInfo(io) catch continue;
     }
     return null;
 }
 
 test "enumerate" {
+    const io = std.testing.io;
     var it: DeviceInfoIterator = .init;
-    while (try it.next()) |di| {
-        _ = di;
+    while (try it.next(io)) |di| {
+        var buf: [256]u8 = undefined;
+        const d = try di.open(io);
+        {
+            const name = try d.getPhysicalLocation(io, &buf);
+            std.debug.print("name: {s}\n", .{name});
+        }
+        {
+            const name = try d.getRawName(io, &buf);
+            std.debug.print("name: {s}\n", .{name});
+        }
     }
 }
