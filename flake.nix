@@ -24,7 +24,7 @@
     }:
     let
       lib = nixpkgs.lib;
-      platforms = lib.getAttrNames zig.packages;
+      platforms = lib.attrNames zig.packages;
       packages =
         system:
         import nixpkgs {
