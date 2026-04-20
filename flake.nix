@@ -23,38 +23,24 @@
       ...
     }:
     let
+      lib = nixpkgs.lib;
+      platforms = lib.getAttrNames zig.packages;
       packages =
         system:
         import nixpkgs {
           inherit system;
         };
-      forAllSystems =
-        function:
-        nixpkgs.lib.genAttrs [
-          "aarch64-linux"
-          "aarch64-darwin"
-          "x86_64-darwin"
-          "x86_64-linux"
-        ] (system: function (packages system));
-
+      forAllSystems = function: nixpkgs.lib.genAttrs platforms (system: function (packages system));
     in
     {
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           name = "zig-hidapi";
           nativeBuildInputs = [
-            zig.packages.${pkgs.stdenv.hostPlatform.system}.master
+            zig.packages.${pkgs.stdenv.hostPlatform.system}."0.16.0"
             pkgs.pinact
             pkgs.reuse
-            # pkgs.zig_0_14
-            # pkgs.hidapi
           ];
-          buildInputs = [
-            # pkgs.hidapi
-          ];
-          # LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
-          #   # pkgs.hidapi
-          # ];
         };
       });
     };
