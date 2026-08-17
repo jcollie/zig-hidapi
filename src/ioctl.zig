@@ -38,6 +38,8 @@ pub const hidraw_devinfo = extern struct {
     vendor: u16,
     product: u16,
 
+    pub const init: hidraw_devinfo = .{ 0, 0, 0 };
+
     comptime {
         std.debug.assert(@sizeOf(hidraw_devinfo) == 8);
     }

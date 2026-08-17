@@ -35,11 +35,11 @@ test "enumerate" {
         const d = try di.open(io);
         {
             const name = try d.getPhysicalLocation(io, &buf);
-            std.debug.print("name: {s}\n", .{name});
+            log.info("name: {d} {s}", .{ di.minor, name });
         }
         {
             const name = try d.getRawName(io, &buf);
-            std.debug.print("name: {s}\n", .{name});
+            log.info("name: {d} {s}\n", .{ di.minor, name });
         }
     }
 }

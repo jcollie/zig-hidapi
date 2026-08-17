@@ -7,20 +7,15 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    _ = b.addModule("hidapi", .{
+    const module = b.addModule("hidapi", .{
         .root_source_file = b.path("src/hidapi.zig"),
+        .target = target,
+        .optimize = optimize,
     });
 
     const unit_tests = b.addTest(
         .{
-            .root_module = b.addModule(
-                "tests",
-                .{
-                    .root_source_file = b.path("src/hidapi.zig"),
-                    .target = target,
-                    .optimize = optimize,
-                },
-            ),
+            .root_module = module,
         },
     );
 
