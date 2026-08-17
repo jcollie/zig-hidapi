@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 .{
-    .name = .zig_hidapi,
+    .name = .hidapi,
     .version = "0.0.2",
-    .fingerprint = 0x6b178366d6299650,
+    .fingerprint = 0x274758e133e8ea3e,
     .dependencies = .{},
     .paths = .{
         "build.zig",
