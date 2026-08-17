@@ -13,29 +13,36 @@
   outputs =
     {
       nixpkgs,
-      zig,
       ...
     }:
     let
-      lib = nixpkgs.lib;
-      platforms = lib.attrNames zig.packages;
-      packages =
+      inherit (nixpkgs) lib;
+      linuxSystems = builtins.filter (
+        system: (lib.systems.elaborate system).isLinux
+      ) lib.systems.flakeExposed;
+      makePackages =
         system:
         import nixpkgs {
           inherit system;
         };
-      forAllSystems = function: nixpkgs.lib.genAttrs platforms (system: function (packages system));
+      forAllSystems = lib.genAttrs linuxSystems;
     in
     {
-      devShells = forAllSystems (pkgs: {
-        default = pkgs.mkShell {
-          name = "zig-hidapi";
-          nativeBuildInputs = [
-            pkgs.pinact
-            pkgs.reuse
-            pkgs.zig_0_16
-          ];
-        };
-      });
+      devShells = forAllSystems (
+        system:
+        let
+          pkgs = makePackages system;
+        in
+        {
+          default = pkgs.mkShell {
+            name = "zig-hidapi";
+            nativeBuildInputs = [
+              pkgs.pinact
+              pkgs.reuse
+              pkgs.zig_0_16
+            ];
+          };
+        }
+      );
     };
 }
