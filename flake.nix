@@ -6,7 +6,7 @@
 
   inputs = {
     nixpkgs = {
-      url = "https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.xz";
+      url = "https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.zst";
     };
   };
 

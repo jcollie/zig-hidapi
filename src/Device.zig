@@ -107,7 +107,12 @@ pub fn getRawName(self: Device, io: std.Io, buf: []u8) ![]const u8 {
         @intFromPtr(buf.ptr),
     );
     switch (rc) {
-        .success => |len| return buf[0..len],
+        .success => |len| {
+            if (len == 0)
+                return buf[0..0]
+            else
+                return buf[0 .. len - 1 :0];
+        },
         .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
             return error.HIDError;
@@ -123,7 +128,12 @@ pub fn getPhysicalLocation(self: Device, io: std.Io, buf: []u8) ![]const u8 {
         @intFromPtr(buf.ptr),
     );
     switch (rc) {
-        .success => |len| return buf[0..len],
+        .success => |len| {
+            if (len == 0)
+                return buf[0..0]
+            else
+                return buf[0 .. len - 1 :0];
+        },
         .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
             return error.HIDError;
@@ -169,7 +179,7 @@ pub fn getBusType(self: Device, io: std.Io) !ioctl.BUS {
 
 pub fn getVendorID(self: Device, io: std.Io) !u16 {
     var info: ioctl.hidraw_devinfo = .init;
-    const rc = ioctl.ioctl(
+    const rc = try ioctl.ioctl(
         io,
         self.fd,
         ioctl.HIDIOCGRAWINFO,
@@ -186,7 +196,7 @@ pub fn getVendorID(self: Device, io: std.Io) !u16 {
 
 pub fn getProductID(self: Device, io: std.Io) !u16 {
     var info: ioctl.hidraw_devinfo = .init;
-    const rc = ioctl.ioctl(
+    const rc = try ioctl.ioctl(
         io,
         self.fd,
         ioctl.HIDIOCGRAWINFO,
@@ -215,15 +225,15 @@ pub fn getProductID(self: Device, io: std.Io) !u16 {
 /// not use numbered reports), followed by the report data (16 bytes). In this
 /// example, the length passed in would be 17.
 pub fn sendFeatureReport(self: Device, io: std.Io, data: []const u8) !usize {
-    const rc = ioctl.ioctl(
+    const rc = try ioctl.ioctl(
         io,
         self.fd,
         ioctl.HIDIOCSFEATURE(data.len),
         @intFromPtr(data.ptr),
     );
     switch (rc) {
-        .success => {
-            return rc;
+        .success => |size| {
+            return size;
         },
         .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
@@ -239,7 +249,7 @@ pub fn sendFeatureReport(self: Device, io: std.Io, data: []const u8) !usize {
 /// byte will still contain the Report ID, and the report data will start in
 /// buf[1].
 pub fn getFeatureReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
-    const rc = ioctl.ioctl(
+    const rc = try ioctl.ioctl(
         io,
         self.fd,
         ioctl.HIDIOCGFEATURE(buf.len),
@@ -261,7 +271,7 @@ pub fn getFeatureReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
 /// byte will still contain the report ID, and the report data will start in
 /// `buf[1]`.
 pub fn getInputReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
-    const rc = ioctl.ioctl(
+    const rc = try ioctl.ioctl(
         io,
         self.fd,
         ioctl.HIDIOCGINPUT(buf.len),
