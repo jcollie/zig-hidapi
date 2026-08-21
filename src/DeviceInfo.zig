@@ -12,8 +12,8 @@ const ioctl = @import("ioctl.zig");
 
 const Device = @import("Device.zig");
 
-/// The minor device number used to access the hidraw device.
-minor: linux.dev_t,
+/// The hidraw device.
+device: Device,
 
 /// The bus type.
 bustype: ioctl.BUS,
@@ -24,9 +24,9 @@ vendor: u16,
 /// The product ID.
 product: u16,
 
-pub fn init(minor: linux.dev_t, info: *const ioctl.hidraw_devinfo) DeviceInfo {
+pub fn init(device: Device, info: *const ioctl.hidraw_devinfo) DeviceInfo {
     return .{
-        .minor = minor,
+        .device = device,
         .bustype = info.bustype,
         .vendor = info.vendor,
         .product = info.product,

@@ -21,7 +21,7 @@ pub fn next(self: *DeviceInfoIterator, io: std.Io) !?DeviceInfo {
     while (self.index < 64) {
         defer self.index += 1;
         const device = Device.open(io, self.index) catch continue;
-        defer device.close(io);
+        errdefer device.close(io);
         return device.getDeviceInfo(io) catch continue;
     }
     return null;

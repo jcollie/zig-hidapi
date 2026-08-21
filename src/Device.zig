@@ -151,7 +151,7 @@ pub fn getDeviceInfo(self: Device, io: std.Io) !DeviceInfo {
     );
     switch (rc) {
         .success => {
-            return DeviceInfo.init(self.minor, &info);
+            return .init(self, &info);
         },
         .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
