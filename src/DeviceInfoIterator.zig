@@ -31,15 +31,21 @@ test "enumerate" {
     const io = std.testing.io;
     var it: DeviceInfoIterator = .init;
     while (try it.next(io)) |di| {
+        const d = di.device;
+        defer d.close(io);
+
         var buf: [256]u8 = undefined;
-        const d = try di.open(io);
         {
             const name = try d.getPhysicalLocation(io, &buf);
-            log.info("name: {d} {s}", .{ di.minor, name });
+            log.info("name: {d} {s}", .{ d.minor, name });
         }
         {
             const name = try d.getRawName(io, &buf);
-            log.info("name: {d} {s}\n", .{ di.minor, name });
+            log.info("name: {d} {s}\n", .{ d.minor, name });
         }
     }
+}
+
+test {
+    std.testing.refAllDecls(@This());
 }

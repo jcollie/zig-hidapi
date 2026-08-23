@@ -38,7 +38,11 @@ pub const hidraw_devinfo = extern struct {
     vendor: u16,
     product: u16,
 
-    pub const init: hidraw_devinfo = .{ 0, 0, 0 };
+    pub const init: hidraw_devinfo = .{
+        .bustype = @enumFromInt(0),
+        .vendor = 0,
+        .product = 0,
+    };
 
     comptime {
         std.debug.assert(@sizeOf(hidraw_devinfo) == 8);
@@ -233,4 +237,8 @@ pub fn ioctl(io: std.Io, fd: linux.fd_t, request: u32, arg: usize) !IOCtlResult 
 
 fn _ioctl(fd: linux.fd_t, request: u32, arg: usize) usize {
     return linux.ioctl(fd, request, arg);
+}
+
+test {
+    std.testing.refAllDecls(@This());
 }

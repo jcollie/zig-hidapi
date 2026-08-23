@@ -33,6 +33,6 @@ pub fn init(device: Device, info: *const ioctl.hidraw_devinfo) DeviceInfo {
     };
 }
 
-pub fn open(self: *const DeviceInfo, io: std.Io) !Device {
-    return try .open(io, self.minor);
+test {
+    std.testing.refAllDecls(@This());
 }

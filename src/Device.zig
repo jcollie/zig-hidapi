@@ -78,7 +78,7 @@ pub fn getReportDescriptorSize(self: Device, io: std.Io) !u32 {
 }
 
 pub fn getReportDescriptor(self: Device, io: std.Io, buf: []u8) ![]const u8 {
-    const size = try self.getReportDescriptorSize();
+    const size = try self.getReportDescriptorSize(io);
     if (buf.len < size) return error.BufferTooSmall;
     var report_descriptor: ioctl.hidraw_report_descriptor = .init(size);
     const rc = try ioctl.ioctl(
@@ -162,7 +162,7 @@ pub fn getDeviceInfo(self: Device, io: std.Io) !DeviceInfo {
 
 pub fn getBusType(self: Device, io: std.Io) !ioctl.BUS {
     var info: ioctl.hidraw_devinfo = .init;
-    const rc = ioctl.ioctl(
+    const rc = try ioctl.ioctl(
         io,
         self.fd,
         ioctl.HIDIOCGRAWINFO,
@@ -204,7 +204,7 @@ pub fn getProductID(self: Device, io: std.Io) !u16 {
     );
     switch (rc) {
         .success => {
-            return info.vendor;
+            return info.product;
         },
         .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
@@ -337,4 +337,47 @@ fn _read(fd: linux.fd_t, data: []u8) ![]const u8 {
             return error.HIDError;
         },
     }
+}
+
+test {
+    // `std.testing.refAllDecls` is not recursive, so the root module
+    // referencing this file does not reach these functions. Referencing them
+    // here is what makes the semantic analyzer check every method body, which
+    // catches errors in methods that no test happens to call.
+    std.testing.refAllDecls(@This());
+}
+
+test "read-only ioctls against attached devices" {
+    const io = std.testing.io;
+
+    var buf: [256]u8 = undefined;
+    var descriptor: [ioctl.HID_MAX_DESCRIPTOR_SIZE]u8 = undefined;
+    var checked: usize = 0;
+
+    for (0..64) |minor| {
+        const device = open(io, @intCast(minor)) catch continue;
+        defer device.close(io);
+
+        // Only side-effect-free calls belong here, because this runs against
+        // whatever hardware happens to be attached. `read` blocks until the
+        // device sends a report, and `write` and `sendFeatureReport` change
+        // device state, so all three are covered by the reference above only.
+        const info = try device.getDeviceInfo(io);
+        try std.testing.expectEqual(info.bustype, try device.getBusType(io));
+        try std.testing.expectEqual(info.vendor, try device.getVendorID(io));
+        try std.testing.expectEqual(info.product, try device.getProductID(io));
+
+        _ = try device.getRawName(io, &buf);
+        _ = try device.getPhysicalLocation(io, &buf);
+
+        const size = try device.getReportDescriptorSize(io);
+        try std.testing.expect(size <= ioctl.HID_MAX_DESCRIPTOR_SIZE);
+        const bytes = try device.getReportDescriptor(io, descriptor[0..size]);
+        try std.testing.expectEqual(@as(usize, size), bytes.len);
+
+        checked += 1;
+    }
+
+    // Nothing attached, or no permission to open any of it.
+    if (checked == 0) return error.SkipZigTest;
 }
