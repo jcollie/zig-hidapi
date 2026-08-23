@@ -136,6 +136,9 @@ pub fn getReportDescriptor(self: Device, io: std.Io, buf: []u8) ![]const u8 {
 ///
 /// Returns `error.BufferTooSmall` if `buf` cannot hold the name and its
 /// terminator. 256 bytes is enough for any name the kernel will report.
+///
+/// Returns `error.BufferTooLarge` if `buf` is longer than a request number
+/// can name, which no useful buffer is; see `ioctl.Size`.
 pub fn getRawName(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
     const request_len = std.math.cast(ioctl.Size, buf.len) orelse
         return error.BufferTooLarge;
@@ -170,7 +173,8 @@ pub fn getRawName(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
 /// aliases `buf` and is NUL terminated.
 ///
 /// Returns `error.BufferTooSmall` if `buf` cannot hold the string and its
-/// terminator.
+/// terminator, and `error.BufferTooLarge` if `buf` is longer than a request
+/// number can name; see `ioctl.Size`.
 pub fn getPhysicalLocation(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
     const request_len = std.math.cast(ioctl.Size, buf.len) orelse
         return error.BufferTooLarge;
@@ -288,6 +292,9 @@ pub fn getProductID(self: Device, io: std.Io) !u16 {
 /// passed to sendFeatureReport(): the Report ID (or 0x0, for devices which do
 /// not use numbered reports), followed by the report data (16 bytes). In this
 /// example, the length passed in would be 17.
+///
+/// Returns `error.BufferTooLarge` if `data` is longer than a request number
+/// can name; see `ioctl.Size`.
 pub fn sendFeatureReport(self: Device, io: std.Io, data: []const u8) !usize {
     const request_len = std.math.cast(ioctl.Size, data.len) orelse
         return error.BufferTooLarge;
@@ -314,6 +321,9 @@ pub fn sendFeatureReport(self: Device, io: std.Io, data: []const u8) !usize {
 /// sure to allow space for this extra byte in `buf`. Upon return, the first
 /// byte will still contain the Report ID, and the report data will start in
 /// buf[1].
+///
+/// Returns `error.BufferTooLarge` if `buf` is longer than a request number
+/// can name; see `ioctl.Size`.
 pub fn getFeatureReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
     const request_len = std.math.cast(ioctl.Size, buf.len) orelse
         return error.BufferTooLarge;
@@ -338,6 +348,9 @@ pub fn getFeatureReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
 /// sure to allow space for this extra byte in `buf`. Upon return, the first
 /// byte will still contain the report ID, and the report data will start in
 /// `buf[1]`.
+///
+/// Returns `error.BufferTooLarge` if `buf` is longer than a request number
+/// can name; see `ioctl.Size`.
 pub fn getInputReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
     const request_len = std.math.cast(ioctl.Size, buf.len) orelse
         return error.BufferTooLarge;
