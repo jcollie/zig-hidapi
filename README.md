@@ -66,7 +66,7 @@ pub fn main(init: std.process.Init) !void {
     while (try it.next(io)) |info| {
         defer info.device.close(io);
 
-        const name = try info.device.getRawName(io, &buf);
+        const name = try info.device.getRawName(io, &buf) orelse "(unnamed)";
         std.debug.print("{x:0>4}:{x:0>4} [{t}] {s}\n", .{
             info.vendor,
             info.product,
@@ -80,6 +80,10 @@ pub fn main(init: std.process.Init) !void {
 The iterator walks `/dev/hidraw0` through `/dev/hidraw63`, silently skipping
 any node that does not exist or cannot be opened. Devices it yields are already
 open; the caller owns them and is responsible for closing them.
+
+`getRawName` and `getPhysicalLocation` return an optional, `null` for a device
+that reports nothing at all, which is why the example supplies a placeholder.
+The string they do return is NUL terminated and aliases the buffer passed in.
 
 ### Opening a device directly
 
@@ -117,6 +121,7 @@ _ = try device.sendFeatureReport(io, &.{ 0x02, 0xff, 0x00 });
 var feature: [32]u8 = undefined;
 feature[0] = 0x02;
 const got = try device.getFeatureReport(io, &feature);
+std.debug.print("feature report: {x}\n", .{got});
 ```
 
 ### Report descriptors
@@ -126,6 +131,7 @@ const size = try device.getReportDescriptorSize(io);
 
 var descriptor: [4096]u8 = undefined;
 const bytes = try device.getReportDescriptor(io, descriptor[0..size]);
+std.debug.print("descriptor: {d} bytes\n", .{bytes.len});
 ```
 
 ## API overview
@@ -145,8 +151,8 @@ An open `hidraw` file descriptor.
 | `sendFeatureReport(io, data)` | Send a feature report over the control endpoint |
 | `getReportDescriptorSize(io)` | Size of the HID report descriptor |
 | `getReportDescriptor(io, buf)` | Copy the HID report descriptor into `buf` |
-| `getRawName(io, buf)` | Vendor and product strings, UTF-8 |
-| `getPhysicalLocation(io, buf)` | USB physical path, or Bluetooth MAC address |
+| `getRawName(io, buf)` | Vendor and product strings, UTF-8, or `null` |
+| `getPhysicalLocation(io, buf)` | USB physical path or Bluetooth MAC address, or `null` |
 | `getDeviceInfo(io)` | Bus type, vendor ID, and product ID as a `DeviceInfo` |
 | `getBusType(io)` | Bus type only |
 | `getVendorID(io)` | Vendor ID only |
