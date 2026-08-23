@@ -38,6 +38,7 @@
             name = "zig-hidapi";
             nativeBuildInputs = [
               pkgs.pinact
+              pkgs.radicle-node
               pkgs.reuse
               pkgs.zig_0_16
             ];

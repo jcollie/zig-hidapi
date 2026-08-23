@@ -181,9 +181,50 @@ KERNEL=="hidraw*", ATTRS{idVendor}=="1234", ATTRS{idProduct}=="5678", MODE="0660
 Then `udevadm control --reload-rules && udevadm trigger`, and make sure your
 user is in the group you named.
 
+## Cloning with Radicle
+
+This repository is also published on [Radicle](https://radicle.xyz), a
+peer-to-peer code collaboration network. Its Repository ID is:
+
+```
+rad:z2XSKZUPc81eR9a7RLZrJbZpkS4su
+```
+
+With the `rad` CLI installed and a local identity created (`rad auth --alias
+<name>`), start your node and clone:
+
+```sh
+rad node start
+rad clone rad:z2XSKZUPc81eR9a7RLZrJbZpkS4su
+```
+
+`rad clone` finds seeds seeding the repository through your node's routing
+table, so the node needs to be running and connected. If discovery fails
+because no seed has been found yet, name one directly:
+
+```sh
+rad clone rad:z2XSKZUPc81eR9a7RLZrJbZpkS4su --seed <NID>
+```
+
+The clone checks out the default branch (`main`) and leaves you seeding the
+repository, so your node will serve it to other peers. `rad sync` pulls later
+changes.
+
+To publish work back, push to the `rad` remote and open a patch:
+
+```sh
+git push rad HEAD:refs/heads/my-change
+rad patch open
+```
+
+The repository is delegated to a single key,
+`did:key:z6MkoM8gqRFf1hARf3cSX2hhe7kgTfKSQpNksR9uKErWotKq`, which is what
+authorizes changes to `main`.
+
 ## Development
 
-A Nix flake provides the toolchain (Zig 0.16, `reuse`, `pinact`):
+A Nix flake provides the toolchain (Zig 0.16, `reuse`, `pinact`, and the
+`rad` CLI):
 
 ```sh
 nix develop
