@@ -1,6 +1,19 @@
 // SPDX-FileCopyrightText: © 2024 Jeffrey C. Ollie <jeff@ocjtech.us>
 // SPDX-License-Identifier: MIT
 
+//! An iterator over the `hidraw` devices attached to the system.
+//!
+//! There is no enumeration ioctl, so this walks the minor numbers `0` through
+//! `63` in order, opening `/dev/hidraw{minor}` and asking each one for its
+//! `DeviceInfo`. Nodes that do not exist, and nodes the caller may not open,
+//! are skipped, so an unprivileged process will usually see nothing at all;
+//! see the udev rule in the README. Devices numbered beyond the last minor
+//! tried are not reported.
+//!
+//! Each `DeviceInfo` yielded carries the `Device` that was opened to read it.
+//! The caller takes ownership of that device and has to `close` it, whether or
+//! not it is the one being looked for.
+
 const DeviceInfoIterator = @This();
 
 const std = @import("std");
@@ -12,10 +25,21 @@ const hidapi = @import("hidapi.zig");
 const Device = @import("Device.zig");
 const DeviceInfo = @import("DeviceInfo.zig");
 
+/// The next minor number to try, i.e. the `N` in `/dev/hidrawN`.
 index: linux.dev_t = 0,
 
+/// An iterator positioned before the first device.
 pub const init: DeviceInfoIterator = .{};
 
+/// Advance to the next device that can be opened and queried, and return its
+/// information.
+///
+/// Returns `null` once the last minor number has been tried, which also
+/// happens on the very first call when nothing is attached or nothing can be
+/// opened.
+///
+/// The `Device` inside the returned `DeviceInfo` is open, and belongs to the
+/// caller from here on.
 pub fn next(self: *DeviceInfoIterator, io: std.Io) !?DeviceInfo {
     if (self.index >= 64) return null;
     while (self.index < 64) {
