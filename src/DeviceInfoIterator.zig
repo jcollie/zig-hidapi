@@ -45,8 +45,13 @@ pub fn next(self: *DeviceInfoIterator, io: std.Io) !?DeviceInfo {
     while (self.index < 64) {
         defer self.index += 1;
         const device = Device.open(io, self.index) catch continue;
-        errdefer device.close(io);
-        return device.getDeviceInfo(io) catch continue;
+        // An errdefer would not fire here, because failing to query the
+        // device continues the scan rather than returning an error, so the
+        // close has to be spelled out.
+        return device.getDeviceInfo(io) catch {
+            device.close(io);
+            continue;
+        };
     }
     return null;
 }
