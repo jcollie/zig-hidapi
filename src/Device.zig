@@ -109,6 +109,10 @@ pub fn getRawName(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
     switch (rc) {
         .success => |len| {
             if (len == 0) return null;
+            // The ioctl clamps its copy to `buf.len` and does not terminate a
+            // name it had to truncate, so a missing terminator means the name
+            // did not fit.
+            if (buf[len - 1] != 0) return error.BufferTooSmall;
             return buf[0 .. len - 1 :0];
         },
         .failure => |e| {
@@ -128,6 +132,8 @@ pub fn getPhysicalLocation(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
     switch (rc) {
         .success => |len| {
             if (len == 0) return null;
+            // See the note in `getRawName`; this ioctl truncates the same way.
+            if (buf[len - 1] != 0) return error.BufferTooSmall;
             return buf[0 .. len - 1 :0];
         },
         .failure => |e| {
@@ -363,8 +369,19 @@ test "read-only ioctls against attached devices" {
         try std.testing.expectEqual(info.vendor, try device.getVendorID(io));
         try std.testing.expectEqual(info.product, try device.getProductID(io));
 
-        _ = try device.getRawName(io, &buf);
         _ = try device.getPhysicalLocation(io, &buf);
+
+        // A buffer that cannot hold the name and its terminator has to be
+        // reported. The ioctl truncates without terminating, so getting this
+        // wrong trips the sentinel check on the returned slice instead.
+        if (try device.getRawName(io, &buf)) |name| {
+            const exact = name.len + 1;
+            try std.testing.expect(try device.getRawName(io, buf[0..exact]) != null);
+            try std.testing.expectError(
+                error.BufferTooSmall,
+                device.getRawName(io, buf[0 .. exact - 1]),
+            );
+        }
 
         const size = try device.getReportDescriptorSize(io);
         try std.testing.expect(size <= ioctl.HID_MAX_DESCRIPTOR_SIZE);
