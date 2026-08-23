@@ -28,7 +28,7 @@ is planned in the current design.
 Fetch the package into your `build.zig.zon`:
 
 ```sh
-zig fetch --save git+https://git.ocjtech.us/jeff/zig-hidapi.git
+zig fetch --save git+https://codeberg.org/jcollie/zig-hidapi.git
 ```
 
 Then wire the module up in `build.zig`:
