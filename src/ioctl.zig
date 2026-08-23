@@ -1,11 +1,33 @@
 // SPDX-FileCopyrightText: © 2024 Jeffrey C. Ollie <jeff@ocjtech.us>
 // SPDX-License-Identifier: MIT
 
-// See https://docs.kernel.org/hid/hidraw.html
+//! The parts of the kernel's `hidraw` interface this library needs: the ioctl
+//! request numbers, the structures they exchange, and a thin wrapper around
+//! the `ioctl` syscall itself.
+//!
+//! The declarations mirror `uapi/linux/hidraw.h`, and the comments on the
+//! request numbers are the kernel's own text from
+//! https://docs.kernel.org/hid/hidraw.html.
+//!
+//! This file is not exported from the root module. Two of its declarations
+//! nonetheless surface in `Device`'s public API: `BUS`, as the type of the bus
+//! a device is attached to, and `HID_MAX_DESCRIPTOR_SIZE`, as a buffer size
+//! that always suffices.
+//!
+//! Requests that carry a caller supplied buffer are functions rather than
+//! constants, because the buffer length is encoded in the request number
+//! itself. Only 14 bits are available for it, so a buffer longer than 16383
+//! bytes cannot be expressed at all; the `@intCast` in each of those functions
+//! catches that in safe builds.
 
 const std = @import("std");
 const linux = std.os.linux;
 
+/// The bus a device is attached to, as the `BUS_*` values of
+/// `uapi/linux/input.h`.
+///
+/// Non-exhaustive, because the kernel gains new bus types over time and may
+/// report one this list does not name.
 pub const BUS = enum(u32) {
     PCI = 0x01,
     ISAPNP = 0x02,
@@ -33,11 +55,20 @@ pub const BUS = enum(u32) {
     _,
 };
 
+/// What `HIDIOCGRAWINFO` fills in, laid out as `struct hidraw_devinfo`.
+///
+/// The kernel declares the vendor and product fields signed. They are the
+/// same bits either way, and a VID or PID reads as an unsigned number, so they
+/// are `u16` here.
 pub const hidraw_devinfo = extern struct {
     bustype: BUS,
     vendor: u16,
     product: u16,
 
+    /// A zeroed value to hand to the ioctl.
+    ///
+    /// Zero is not one of the `BUS_*` values, which only a non-exhaustive
+    /// `BUS` can represent; a device that answers always overwrites it.
     pub const init: hidraw_devinfo = .{
         .bustype = @enumFromInt(0),
         .vendor = 0,
@@ -45,16 +76,31 @@ pub const hidraw_devinfo = extern struct {
     };
 
     comptime {
+        // The kernel copies this structure in and out by size, so a layout
+        // that drifts from the header has to fail the build rather than
+        // quietly exchange the wrong bytes.
         std.debug.assert(@sizeOf(hidraw_devinfo) == 8);
     }
 };
 
+/// The largest report descriptor the kernel will hand out, so a buffer this
+/// size always fits one.
 pub const HID_MAX_DESCRIPTOR_SIZE = 4096;
 
+/// What `HIDIOCGRDESC` fills in, laid out as
+/// `struct hidraw_report_descriptor`.
+///
+/// The buffer is a fixed `HID_MAX_DESCRIPTOR_SIZE` bytes rather than a
+/// pointer, so a value of this type is over 4 KiB and is worth keeping off a
+/// small stack.
 pub const hidraw_report_descriptor = extern struct {
     size: u32,
     value: [HID_MAX_DESCRIPTOR_SIZE]u8,
 
+    /// A zeroed descriptor asking for `size` bytes.
+    ///
+    /// `HIDIOCGRDESC` copies out only as many bytes as this says, so `size`
+    /// has to be set before the call, from `HIDIOCGRDESCSIZE`.
     pub fn init(size: u32) hidraw_report_descriptor {
         return .{
             .size = size,
@@ -83,6 +129,12 @@ pub const HIDIOCGRDESC = linux.IOCTL.IOR('H', 0x02, hidraw_report_descriptor);
 /// which are defined in uapi/linux/input.h.
 pub const HIDIOCGRAWINFO = linux.IOCTL.IOR('H', 0x03, hidraw_devinfo);
 
+// The direction bits of an ioctl request number, named from userspace's point
+// of view: `read` means the kernel writes into the caller's buffer. They match
+// the encoding `std.os.linux.IOCTL` uses on x86, ARM, RISC-V and the rest of
+// the common architectures. MIPS, PowerPC and SPARC spend three bits on the
+// direction and give the write bit a different value, so the requests built
+// below would be wrong there.
 const read = 2;
 const write = 1;
 
@@ -145,6 +197,14 @@ pub fn HIDIOCGFEATURE(len: usize) u32 {
     return @bitCast(request);
 }
 
+/// This ioctl returns the kernel's `uniq` string for the device, which usbhid
+/// fills in from the device's serial number and the Bluetooth transport fills
+/// in with the hardware (MAC) address. Devices that report neither leave it
+/// empty.
+///
+/// Unlike the comments above, this one is not the kernel's own text: the
+/// hidraw documentation does not cover this request. Nothing in this library
+/// issues it yet.
 pub fn HIDIOCGRAWUNIQ(len: usize) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
@@ -220,11 +280,21 @@ pub fn HIDIOCGOUTPUT(len: usize) u32 {
     return @bitCast(request);
 }
 
+/// The outcome of an ioctl: what the syscall returned, or why it refused.
 pub const IOCtlResult = union(enum) {
+    /// The syscall's return value. Most of these requests return zero, but
+    /// the ones that copy a string out return the number of bytes copied,
+    /// including the terminator.
     success: usize,
+    /// The `errno` the syscall set.
     failure: linux.E,
 };
 
+/// Issue `request` on `fd` with `arg`, dispatched through `io`.
+///
+/// A failing syscall is reported as `.failure` rather than an error, leaving
+/// each caller to decide which `errno` values matter to it. The error union
+/// only covers a failure to dispatch the call through `io` in the first place.
 pub fn ioctl(io: std.Io, fd: linux.fd_t, request: u32, arg: usize) !IOCtlResult {
     var future = try io.concurrent(_ioctl, .{ fd, request, arg });
     defer _ = future.cancel(io);
@@ -235,6 +305,7 @@ pub fn ioctl(io: std.Io, fd: linux.fd_t, request: u32, arg: usize) !IOCtlResult 
     }
 }
 
+/// The blocking half of `ioctl`, the part that `io` runs.
 fn _ioctl(fd: linux.fd_t, request: u32, arg: usize) usize {
     return linux.ioctl(fd, request, arg);
 }
