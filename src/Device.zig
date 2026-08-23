@@ -99,7 +99,7 @@ pub fn getReportDescriptor(self: Device, io: std.Io, buf: []u8) ![]const u8 {
     }
 }
 
-pub fn getRawName(self: Device, io: std.Io, buf: []u8) ![]const u8 {
+pub fn getRawName(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
     const rc = try ioctl.ioctl(
         io,
         self.fd,
@@ -108,10 +108,8 @@ pub fn getRawName(self: Device, io: std.Io, buf: []u8) ![]const u8 {
     );
     switch (rc) {
         .success => |len| {
-            if (len == 0)
-                return buf[0..0]
-            else
-                return buf[0 .. len - 1 :0];
+            if (len == 0) return null;
+            return buf[0 .. len - 1 :0];
         },
         .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});
@@ -120,7 +118,7 @@ pub fn getRawName(self: Device, io: std.Io, buf: []u8) ![]const u8 {
     }
 }
 
-pub fn getPhysicalLocation(self: Device, io: std.Io, buf: []u8) ![]const u8 {
+pub fn getPhysicalLocation(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
     const rc = try ioctl.ioctl(
         io,
         self.fd,
@@ -129,10 +127,8 @@ pub fn getPhysicalLocation(self: Device, io: std.Io, buf: []u8) ![]const u8 {
     );
     switch (rc) {
         .success => |len| {
-            if (len == 0)
-                return buf[0..0]
-            else
-                return buf[0 .. len - 1 :0];
+            if (len == 0) return null;
+            return buf[0 .. len - 1 :0];
         },
         .failure => |e| {
             log.warn("problem: {s}", .{@tagName(e)});

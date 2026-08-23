@@ -36,11 +36,11 @@ test "enumerate" {
 
         var buf: [256]u8 = undefined;
         {
-            const name = try d.getPhysicalLocation(io, &buf);
+            const name = try d.getPhysicalLocation(io, &buf) orelse "(unknown)";
             log.info("name: {d} {s}", .{ d.minor, name });
         }
         {
-            const name = try d.getRawName(io, &buf);
+            const name = try d.getRawName(io, &buf) orelse "(unnamed)";
             log.info("name: {d} {s}\n", .{ d.minor, name });
         }
     }
