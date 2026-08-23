@@ -44,8 +44,12 @@ exe.root_module.addImport("hidapi", hidapi.module("hidapi"));
 
 ## Usage
 
-Every call takes a `std.Io` as its first argument. The examples below use
-`std.Io.Threaded`, but any implementation (such as `std.Io.Uring`) will do.
+Every call takes a `std.Io` as its first argument. Declaring `main` with a
+`std.process.Init` parameter is the easiest way to get one: the runtime builds
+an `Io` implementation appropriate for the target and hands it over as
+`init.io`. Constructing one yourself (`std.Io.Threaded`, `std.Io.Uring`) works
+just as well, and is what you need when the caller is a library rather than
+`main`.
 
 ### Enumerating devices
 
@@ -53,13 +57,8 @@ Every call takes a `std.Io` as its first argument. The examples below use
 const std = @import("std");
 const hidapi = @import("hidapi");
 
-pub fn main() !void {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = debug_allocator.deinit();
-
-    var threaded: std.Io.Threaded = .init(debug_allocator.allocator(), .{});
-    defer threaded.deinit();
-    const io = threaded.io();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
 
     var buf: [256]u8 = undefined;
     var it: hidapi.DeviceInfoIterator = .init;
