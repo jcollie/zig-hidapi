@@ -3,7 +3,7 @@
 
 .{
     .name = .hidapi,
-    .version = "0.0.2",
+    .version = "0.0.3",
     .fingerprint = 0x274758e133e8ea3e,
     .dependencies = .{},
     .paths = .{
@@ -11,5 +11,6 @@
         "build.zig.zon",
         "src",
         "LICENSES",
+        "README.md",
     },
 }
