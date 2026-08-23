@@ -137,10 +137,12 @@ pub fn getReportDescriptor(self: Device, io: std.Io, buf: []u8) ![]const u8 {
 /// Returns `error.BufferTooSmall` if `buf` cannot hold the name and its
 /// terminator. 256 bytes is enough for any name the kernel will report.
 pub fn getRawName(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
+    const request_len = std.math.cast(ioctl.Size, buf.len) orelse
+        return error.BufferTooLarge;
     const rc = try ioctl.ioctl(
         io,
         self.fd,
-        ioctl.HIDIOCGRAWNAME(buf.len),
+        ioctl.HIDIOCGRAWNAME(request_len),
         @intFromPtr(buf.ptr),
     );
     switch (rc) {
@@ -170,10 +172,12 @@ pub fn getRawName(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
 /// Returns `error.BufferTooSmall` if `buf` cannot hold the string and its
 /// terminator.
 pub fn getPhysicalLocation(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
+    const request_len = std.math.cast(ioctl.Size, buf.len) orelse
+        return error.BufferTooLarge;
     const rc = try ioctl.ioctl(
         io,
         self.fd,
-        ioctl.HIDIOCGRAWPHYS(buf.len),
+        ioctl.HIDIOCGRAWPHYS(request_len),
         @intFromPtr(buf.ptr),
     );
     switch (rc) {
@@ -285,10 +289,12 @@ pub fn getProductID(self: Device, io: std.Io) !u16 {
 /// not use numbered reports), followed by the report data (16 bytes). In this
 /// example, the length passed in would be 17.
 pub fn sendFeatureReport(self: Device, io: std.Io, data: []const u8) !usize {
+    const request_len = std.math.cast(ioctl.Size, data.len) orelse
+        return error.BufferTooLarge;
     const rc = try ioctl.ioctl(
         io,
         self.fd,
-        ioctl.HIDIOCSFEATURE(data.len),
+        ioctl.HIDIOCSFEATURE(request_len),
         @intFromPtr(data.ptr),
     );
     switch (rc) {
@@ -309,10 +315,12 @@ pub fn sendFeatureReport(self: Device, io: std.Io, data: []const u8) !usize {
 /// byte will still contain the Report ID, and the report data will start in
 /// buf[1].
 pub fn getFeatureReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
+    const request_len = std.math.cast(ioctl.Size, buf.len) orelse
+        return error.BufferTooLarge;
     const rc = try ioctl.ioctl(
         io,
         self.fd,
-        ioctl.HIDIOCGFEATURE(buf.len),
+        ioctl.HIDIOCGFEATURE(request_len),
         @intFromPtr(buf.ptr),
     );
     switch (rc) {
@@ -331,10 +339,12 @@ pub fn getFeatureReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
 /// byte will still contain the report ID, and the report data will start in
 /// `buf[1]`.
 pub fn getInputReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
+    const request_len = std.math.cast(ioctl.Size, buf.len) orelse
+        return error.BufferTooLarge;
     const rc = try ioctl.ioctl(
         io,
         self.fd,
-        ioctl.HIDIOCGINPUT(buf.len),
+        ioctl.HIDIOCGINPUT(request_len),
         @intFromPtr(buf.ptr),
     );
     switch (rc) {

@@ -9,19 +9,27 @@
 //! request numbers are the kernel's own text from
 //! https://docs.kernel.org/hid/hidraw.html.
 //!
-//! This file is not exported from the root module. Two of its declarations
-//! nonetheless surface in `Device`'s public API: `BUS`, as the type of the bus
-//! a device is attached to, and `HID_MAX_DESCRIPTOR_SIZE`, as a buffer size
-//! that always suffices.
+//! This file is not exported from the root module. Three of its declarations
+//! nonetheless reach `Device`'s callers: `BUS`, as the type of the bus a
+//! device is attached to, `HID_MAX_DESCRIPTOR_SIZE`, as a buffer size that
+//! always suffices, and `Size`, as the bound a buffer length has to fit.
 //!
 //! Requests that carry a caller supplied buffer are functions rather than
 //! constants, because the buffer length is encoded in the request number
-//! itself. Only 14 bits are available for it, so a buffer longer than 16383
-//! bytes cannot be expressed at all; the `@intCast` in each of those functions
-//! catches that in safe builds.
+//! itself. They take that length as a `Size`, which is narrower than the
+//! `usize` a caller usually has in hand, so the narrowing and the decision of
+//! what to do about a buffer too large to name belong to the caller.
 
 const std = @import("std");
 const linux = std.os.linux;
+
+/// The type of the length field of a request number, and so the largest
+/// buffer any of the requests below can name: 14 bits on most architectures,
+/// 13 bits on the ones that spend an extra bit on the direction.
+///
+/// Public so that a caller holding a `usize` length can narrow it, which
+/// `Device` does with `std.math.cast`.
+pub const Size = @FieldType(linux.IOCTL.Request, "size");
 
 /// The bus a device is attached to, as the `BUS_*` values of
 /// `uapi/linux/input.h`.
@@ -133,19 +141,20 @@ pub const HIDIOCGRAWINFO = linux.IOCTL.IOR('H', 0x03, hidraw_devinfo);
 // of view: `read` means the kernel writes into the caller's buffer. They match
 // the encoding `std.os.linux.IOCTL` uses on x86, ARM, RISC-V and the rest of
 // the common architectures. MIPS, PowerPC and SPARC spend three bits on the
-// direction and give the write bit a different value, so the requests built
-// below would be wrong there.
+// direction and give the write bit a different value, so unlike `Size`, which
+// follows whatever the target uses, these do not, and the requests built below
+// would be wrong there.
 const read = 2;
 const write = 1;
 
 /// This ioctl returns a string containing the vendor and product strings of the
 /// device. The returned string is Unicode, UTF-8 encoded.
-pub fn HIDIOCGRAWNAME(len: usize) u32 {
+pub fn HIDIOCGRAWNAME(len: Size) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x04,
         .dir = read,
-        .size = @intCast(len),
+        .size = len,
     };
     return @bitCast(request);
 }
@@ -154,12 +163,12 @@ pub fn HIDIOCGRAWNAME(len: usize) u32 {
 /// device. For USB devices, the string contains the physical path to the device
 /// (the USB controller, hubs, ports, etc). For Bluetooth devices, the string
 /// contains the hardware (MAC) address of the device.
-pub fn HIDIOCGRAWPHYS(len: usize) u32 {
+pub fn HIDIOCGRAWPHYS(len: Size) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x05,
         .dir = read,
-        .size = @intCast(len),
+        .size = len,
     };
     return @bitCast(request);
 }
@@ -170,12 +179,12 @@ pub fn HIDIOCGRAWPHYS(len: usize) u32 {
 /// which do not use numbered reports, set the first byte to 0. The report data
 /// begins in the second byte. Make sure to set len accordingly, to one more
 /// than the length of the report (to account for the report number).
-pub fn HIDIOCSFEATURE(len: usize) u32 {
+pub fn HIDIOCSFEATURE(len: Size) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x06,
         .dir = read | write,
-        .size = @intCast(len),
+        .size = len,
     };
     return @bitCast(request);
 }
@@ -187,12 +196,12 @@ pub fn HIDIOCSFEATURE(len: usize) u32 {
 /// the report number in the first byte, followed by the report data read from
 /// the device. For devices which do not use numbered reports, the report data
 /// will begin at the first byte of the returned buffer.
-pub fn HIDIOCGFEATURE(len: usize) u32 {
+pub fn HIDIOCGFEATURE(len: Size) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x07,
         .dir = read | write,
-        .size = @intCast(len),
+        .size = len,
     };
     return @bitCast(request);
 }
@@ -205,12 +214,12 @@ pub fn HIDIOCGFEATURE(len: usize) u32 {
 /// Unlike the comments above, this one is not the kernel's own text: the
 /// hidraw documentation does not cover this request. Nothing in this library
 /// issues it yet.
-pub fn HIDIOCGRAWUNIQ(len: usize) u32 {
+pub fn HIDIOCGRAWUNIQ(len: Size) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x08,
         .dir = read,
-        .size = @intCast(len),
+        .size = len,
     };
     return @bitCast(request);
 }
@@ -220,12 +229,12 @@ pub fn HIDIOCGRAWUNIQ(len: usize) u32 {
 /// meaningless and has no effect, but some devices may choose to use this to
 /// set or reset an initial state of a report. The format of the buffer issued
 /// with this report is identical to that of HIDIOCSFEATURE.
-pub fn HIDIOCSINPUT(len: usize) u32 {
+pub fn HIDIOCSINPUT(len: Size) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x09,
         .dir = read | write,
-        .size = @intCast(len),
+        .size = len,
     };
     return @bitCast(request);
 }
@@ -237,12 +246,12 @@ pub fn HIDIOCSINPUT(len: usize) u32 {
 /// states of an input report of a device, before an application listens for
 /// normal reports via the regular device read() interface. The format of the
 /// buffer issued with this report is identical to that of HIDIOCGFEATURE.
-pub fn HIDIOCGINPUT(len: usize) u32 {
+pub fn HIDIOCGINPUT(len: Size) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x0A,
         .dir = read | write,
-        .size = @intCast(len),
+        .size = len,
     };
     return @bitCast(request);
 }
@@ -254,12 +263,12 @@ pub fn HIDIOCGINPUT(len: usize) u32 {
 /// before an application sends updates via the regular device write()
 /// interface. The format of the buffer issued with this report is identical to
 /// that of HIDIOCSFEATURE.
-pub fn HIDIOCSOUTPUT(len: usize) u32 {
+pub fn HIDIOCSOUTPUT(len: Size) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x0B,
         .dir = read | write,
-        .size = @intCast(len),
+        .size = len,
     };
     return @bitCast(request);
 }
@@ -270,12 +279,12 @@ pub fn HIDIOCSOUTPUT(len: usize) u32 {
 /// either via a HIDIOCSOUTPUT request, or the regular device write() interface.
 /// The format of the buffer issued with this report is identical to that of
 /// HIDIOCGFEATURE.
-pub fn HIDIOCGOUTPUT(len: usize) u32 {
+pub fn HIDIOCGOUTPUT(len: Size) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x0C,
         .dir = read | write,
-        .size = @intCast(len),
+        .size = len,
     };
     return @bitCast(request);
 }
