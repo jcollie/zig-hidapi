@@ -150,7 +150,10 @@ pub fn getRawName(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
     );
     switch (rc) {
         .success => |len| {
-            if (len == 0) return null;
+            // A zero length means `buf` was empty, and a lone terminator means
+            // the string was. A single byte that is not the terminator is a
+            // string the buffer could not hold, which the check below catches.
+            if (len == 0 or (len == 1 and buf[0] == 0)) return null;
             // The ioctl clamps its copy to `buf.len` and does not terminate a
             // name it had to truncate, so a missing terminator means the name
             // did not fit.
@@ -164,13 +167,18 @@ pub fn getRawName(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
     }
 }
 
-/// Get the device's `uniq` string.
+/// Get the device's `uniq` string, an identifier meant to be unique to the
+/// individual device: usbhid seeds it from the USB serial number string and
+/// the Bluetooth transports from the hardware (MAC) address, though a device
+/// driver may replace it with a serial of its own.
 ///
-/// Returns `null` when the device reports no `uniq` at all. Otherwise the
-/// result aliases `buf` and is NUL terminated.
+/// Returns `null` when the device reports no `uniq`, which is the common
+/// case for USB devices. Otherwise the result aliases `buf` and is NUL
+/// terminated.
 ///
-/// Returns `error.BufferTooSmall` if `buf` cannot hold the name and its
-/// terminator. 256 bytes is enough for any name the kernel will report.
+/// Returns `error.BufferTooSmall` if `buf` cannot hold the string and its
+/// terminator. The kernel keeps `uniq` in a 64 byte field, so a 64 byte
+/// buffer always fits.
 ///
 /// Returns `error.BufferTooLarge` if `buf` is longer than a request number
 /// can name, which no useful buffer is; see `ioctl.Size`.
@@ -185,7 +193,10 @@ pub fn getRawUniq(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
     );
     switch (rc) {
         .success => |len| {
-            if (len == 0) return null;
+            // A zero length means `buf` was empty, and a lone terminator means
+            // the string was. A single byte that is not the terminator is a
+            // string the buffer could not hold, which the check below catches.
+            if (len == 0 or (len == 1 and buf[0] == 0)) return null;
             // The ioctl clamps its copy to `buf.len` and does not terminate a
             // name it had to truncate, so a missing terminator means the name
             // did not fit.
@@ -221,7 +232,10 @@ pub fn getPhysicalLocation(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
     );
     switch (rc) {
         .success => |len| {
-            if (len == 0) return null;
+            // A zero length means `buf` was empty, and a lone terminator means
+            // the string was. A single byte that is not the terminator is a
+            // string the buffer could not hold, which the check below catches.
+            if (len == 0 or (len == 1 and buf[0] == 0)) return null;
             // See the note in `getRawName`; this ioctl truncates the same way.
             if (buf[len - 1] != 0) return error.BufferTooSmall;
             return buf[0 .. len - 1 :0];

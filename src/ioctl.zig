@@ -212,8 +212,7 @@ pub fn HIDIOCGFEATURE(len: Size) u32 {
 /// empty.
 ///
 /// Unlike the comments above, this one is not the kernel's own text: the
-/// hidraw documentation does not cover this request. Nothing in this library
-/// issues it yet.
+/// hidraw documentation does not cover this request.
 pub fn HIDIOCGRAWUNIQ(len: Size) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
