@@ -60,18 +60,24 @@ const hidapi = @import("hidapi");
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
 
-    var buf: [256]u8 = undefined;
+    var name_buf: [256]u8 = undefined;
+    var uniq_buf: [64]u8 = undefined;
+    var phys_buf: [256]u8 = undefined;
     var it: hidapi.DeviceInfoIterator = .init;
 
     while (try it.next(io)) |info| {
         defer info.device.close(io);
 
-        const name = try info.device.getRawName(io, &buf) orelse "(unnamed)";
-        std.debug.print("{x:0>4}:{x:0>4} [{t}] {s}\n", .{
+        const name = try info.device.getRawName(io, &name_buf) orelse "(unnamed)";
+        const uniq = try info.device.getRawUniq(io, &uniq_buf) orelse "(none)";
+        const phys = try info.device.getPhysicalLocation(io, &phys_buf) orelse "(unknown)";
+        std.debug.print("{x:0>4}:{x:0>4} [{t}] {s} ({s}) at {s}\n", .{
             info.vendor,
             info.product,
             info.bustype,
             name,
+            uniq,
+            phys,
         });
     }
 }
@@ -81,9 +87,17 @@ The iterator walks `/dev/hidraw0` through `/dev/hidraw63`, silently skipping
 any node that does not exist or cannot be opened. Devices it yields are already
 open; the caller owns them and is responsible for closing them.
 
-`getRawName` and `getPhysicalLocation` return an optional, `null` for a device
-that reports nothing at all, which is why the example supplies a placeholder.
-The string they do return is NUL terminated and aliases the buffer passed in.
+`getRawName`, `getRawUniq`, and `getPhysicalLocation` return an optional,
+`null` for a device that reports nothing at all, which is why the example
+supplies a placeholder. A `null` `uniq` is the common case rather than an
+oddity: usbhid only fills it in when the device carries a serial number
+string, while the Bluetooth transports always seed it from the hardware
+address. The physical location is the path through the USB controller, hubs
+and ports for a USB device, and the hardware address for a Bluetooth one, so
+it stays the same across replugs of whatever is in that port while `uniq`
+follows the device itself. The string they do return is NUL terminated and
+aliases the buffer passed in, so the example uses a separate buffer for each
+rather than letting a later call overwrite an earlier result.
 
 ### Opening a device directly
 
@@ -152,6 +166,7 @@ An open `hidraw` file descriptor.
 | `getReportDescriptorSize(io)` | Size of the HID report descriptor |
 | `getReportDescriptor(io, buf)` | Copy the HID report descriptor into `buf` |
 | `getRawName(io, buf)` | Vendor and product strings, UTF-8, or `null` |
+| `getRawUniq(io, buf)` | Per-device identifier (serial number or MAC), or `null` |
 | `getPhysicalLocation(io, buf)` | USB physical path or Bluetooth MAC address, or `null` |
 | `getDeviceInfo(io)` | Bus type, vendor ID, and product ID as a `DeviceInfo` |
 | `getBusType(io)` | Bus type only |
