@@ -70,7 +70,11 @@ test "enumerate" {
         }
         {
             const name = try d.getRawName(io, &buf) orelse "(unnamed)";
-            log.info("name: {d} {s}\n", .{ d.minor, name });
+            log.info("name: {d} {s}", .{ d.minor, name });
+        }
+        {
+            const name = try d.getRawUniq(io, &buf) orelse "(unnamed)";
+            log.info("uniq: {d} {s}", .{ d.minor, name });
         }
     }
 }

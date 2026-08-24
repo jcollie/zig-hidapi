@@ -164,6 +164,41 @@ pub fn getRawName(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
     }
 }
 
+/// Get the device's `uniq` string.
+///
+/// Returns `null` when the device reports no `uniq` at all. Otherwise the
+/// result aliases `buf` and is NUL terminated.
+///
+/// Returns `error.BufferTooSmall` if `buf` cannot hold the name and its
+/// terminator. 256 bytes is enough for any name the kernel will report.
+///
+/// Returns `error.BufferTooLarge` if `buf` is longer than a request number
+/// can name, which no useful buffer is; see `ioctl.Size`.
+pub fn getRawUniq(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
+    const request_len = std.math.cast(ioctl.Size, buf.len) orelse
+        return error.BufferTooLarge;
+    const rc = try ioctl.ioctl(
+        io,
+        self.fd,
+        ioctl.HIDIOCGRAWUNIQ(request_len),
+        @intFromPtr(buf.ptr),
+    );
+    switch (rc) {
+        .success => |len| {
+            if (len == 0) return null;
+            // The ioctl clamps its copy to `buf.len` and does not terminate a
+            // name it had to truncate, so a missing terminator means the name
+            // did not fit.
+            if (buf[len - 1] != 0) return error.BufferTooSmall;
+            return buf[0 .. len - 1 :0];
+        },
+        .failure => |e| {
+            log.warn("problem: {s}", .{@tagName(e)});
+            return error.HIDError;
+        },
+    }
+}
+
 /// Get a string describing the physical address of the device.
 ///
 /// For USB devices this is the physical path through the controller, hubs
