@@ -7,8 +7,9 @@
 //! `63` in order, opening `/dev/hidraw{minor}` and asking each one for its
 //! `DeviceInfo`. Nodes that do not exist, and nodes the caller may not open,
 //! are skipped, so an unprivileged process will usually see nothing at all;
-//! see the udev rule in the README. Devices numbered beyond the last minor
-//! tried are not reported.
+//! see the udev rule in
+//! [the README](https://codeberg.org/jcollie/zig-hidapi#user-content-permissions).
+//! Devices numbered beyond the last minor tried are not reported.
 //!
 //! Each `DeviceInfo` yielded carries the `Device` that was opened to read it.
 //! The caller takes ownership of that device and has to `close` it, whether or
