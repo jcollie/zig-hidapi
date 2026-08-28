@@ -68,3 +68,38 @@ jobs:
           zig build test -Doptimize=Debug --summary all
           zig build test -Doptimize=ReleaseSafe --summary all
           zig build test -Doptimize=ReleaseFast --summary all
+
+  docs:
+    # Publishes the generated API reference to
+    # https://jcollie.codeberg.page/zig-hidapi/ .
+    #
+    # This lives in the same workflow as the tests because `needs` only refers
+    # to jobs within one workflow; a separate file could not wait on them. The
+    # tests have to be green first, so a build that no longer compiles never
+    # replaces the published documentation.
+    needs: test
+    # ...and only from the default branch, or any pushed branch would publish
+    # over the live site.
+    if: ${{ forge.ref == 'refs/heads/main' }}
+    runs-on: codeberg-small
+    steps:
+      - name: Check out
+        uses: https://code.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Zig
+        uses: https://codeberg.org/mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+
+      - name: Build the API documentation
+        run: |
+          zig version
+          zig build docs
+
+      # git-pages resolves `v2` to a branch head, which moves; this is the
+      # v2.2.0 release commit, pinned like the other actions here. It commits
+      # the directory to the `pages` branch, which is what Codeberg serves.
+      - name: Publish to Codeberg Pages
+        uses: https://codeberg.org/git-pages/action@2b24bbb7ff943d3c8fe1df91326adec66daea6dd # v2.2.0
+        with:
+          site: https://${{ forge.repository_owner }}.codeberg.page/zig-hidapi/
+          token: ${{ forge.token }}
+          source: zig-out/docs/
