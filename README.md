@@ -261,13 +261,15 @@ Build and test:
 ```sh
 zig build
 zig build test
-zig build docs      # API reference into zig-out/docs
+zig build docs        # API reference into zig-out/docs
+zig build docs-serve  # ...and serve it at http://127.0.0.1:8000/
 ```
 
 The documentation is a WebAssembly viewer that fetches `sources.tar`, so it has
 to be served over HTTP; opening `zig-out/docs/index.html` from the filesystem
-shows an empty page. `python3 -m http.server -d zig-out/docs` is enough to read
-it locally. CI publishes the same output to [the address above][docs].
+shows an empty page, which is why there is a step that serves it and why `zig
+std` works the same way. `-Ddocs-port=N` chooses another port. CI publishes the
+same output to [the address above][docs].
 
 The `enumerate` test opens real devices on the host, so its results depend on
 what hardware is attached and on the permissions described above.
