@@ -32,9 +32,17 @@ jobs:
 
   test:
     # Gated on the licensing check, so a missing SPDX header fails without
-    # spending a compiler download and three builds on the run.
+    # spending three compiler downloads and three builds on the run.
     needs: reuse
     runs-on: codeberg-small
+    # One job per optimize mode rather than three builds in sequence: a
+    # codeberg-small runner is capped at five minutes, which the three together
+    # were approaching. Each mode now gets its own budget and they run
+    # concurrently. The job appears once per mode, as `test (Debug)` and so on,
+    # and `needs: test` elsewhere waits for all of them.
+    strategy:
+      matrix:
+        optimize: [Debug, ReleaseSafe, ReleaseFast]
     steps:
       - name: Check out
         # No `container:` override: the codeberg-small runner image already
@@ -58,16 +66,17 @@ jobs:
       # find nothing: "read-only ioctls against attached devices" reports
       # SkipZigTest and "enumerate" iterates an empty directory. What this
       # actually proves is that every declaration still compiles, which the
-      # refAllDecls tests reach even for methods no test calls. Run in each
-      # optimize mode: Debug and ReleaseSafe keep the safety checks that catch
-      # overflow and out-of-bounds access, while ReleaseFast drops them and can
-      # expose different behaviour.
+      # refAllDecls tests reach even for methods no test calls.
+      #
+      # Debug and ReleaseSafe keep the safety checks that catch overflow and
+      # out-of-bounds access, while ReleaseFast drops them and can expose
+      # different behaviour. Only the Debug job also runs the docs server's
+      # tests; build.zig leaves them out of the other two, where they would
+      # re-run the same host binary.
       - name: Test
         run: |
           zig version
-          zig build test -Doptimize=Debug --summary all
-          zig build test -Doptimize=ReleaseSafe --summary all
-          zig build test -Doptimize=ReleaseFast --summary all
+          zig build test -Doptimize=${{ matrix.optimize }} --summary all
 
   docs:
     # Publishes the generated API reference to
