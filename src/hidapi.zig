@@ -34,6 +34,9 @@
 //! `/dev/hidraw*` is normally root only, so opening a device as an
 //! unprivileged process fails with `error.HIDDeviceNoAccess` until a udev rule
 //! grants access; the README has one to copy.
+//!
+//! The source, the README with that rule, and the issue tracker are at
+//! [codeberg.org/jcollie/zig-hidapi](https://codeberg.org/jcollie/zig-hidapi).
 
 const std = @import("std");
 
