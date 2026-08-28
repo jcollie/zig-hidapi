@@ -150,6 +150,12 @@ std.debug.print("descriptor: {d} bytes\n", .{bytes.len});
 
 ## API overview
 
+The generated reference, covering every declaration with its doc comments, is
+published at [jcollie.codeberg.page/zig-hidapi][docs]. CI rebuilds it whenever
+`main` goes green. What follows is a summary.
+
+[docs]: https://jcollie.codeberg.page/zig-hidapi/
+
 ### `hidapi.Device`
 
 An open `hidraw` file descriptor.
@@ -255,7 +261,13 @@ Build and test:
 ```sh
 zig build
 zig build test
+zig build docs      # API reference into zig-out/docs
 ```
+
+The documentation is a WebAssembly viewer that fetches `sources.tar`, so it has
+to be served over HTTP; opening `zig-out/docs/index.html` from the filesystem
+shows an empty page. `python3 -m http.server -d zig-out/docs` is enough to read
+it locally. CI publishes the same output to [the address above][docs].
 
 The `enumerate` test opens real devices on the host, so its results depend on
 what hardware is attached and on the permissions described above.
