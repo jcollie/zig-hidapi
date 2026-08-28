@@ -1,0 +1,70 @@
+# SPDX-FileCopyrightText: © 2026 Jeffrey C. Ollie <jeff@ocjtech.us>
+# SPDX-License-Identifier: MIT
+
+# Actions are pinned to a commit, with the tag they came from in a trailing
+# comment, so that a moving tag cannot change what CI executes. These pins have
+# to be updated by hand: the pinact in the dev shell only understands bare
+# GitHub `owner/repo` references, and errors out on the full URLs that Forgejo
+# needs for actions hosted outside the instance.
+
+name: test
+
+# The workflow has to be on the default branch for the manual trigger to show
+# up in the UI, where it appears as a "Run workflow" button on the Actions tab.
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  reuse:
+    runs-on: codeberg-small
+    steps:
+      - name: Check out
+        uses: https://code.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Every file needs an SPDX header and every license a file in LICENSES/,
+      # which is easy to forget when adding one. reuse is a Python tool and the
+      # runner image ships pipx, so no install step of its own is needed. The
+      # major version is pinned so that a new REUSE specification cannot turn
+      # this red without a change here.
+      - name: Check REUSE compliance
+        run: pipx run --spec 'reuse>=6,<7' reuse lint
+
+  test:
+    # Gated on the licensing check, so a missing SPDX header fails without
+    # spending a compiler download and three builds on the run.
+    needs: reuse
+    runs-on: codeberg-small
+    steps:
+      - name: Check out
+        # No `container:` override: the codeberg-small runner image already
+        # provides what the steps below need -- a node new enough for these
+        # JavaScript actions (checkout v5 and later declare a node24 runtime),
+        # and the xz that setup-zig shells out to when unpacking the compiler.
+        uses: https://code.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Must follow the checkout: with no `version` given, setup-zig reads the
+      # version out of build.zig.zon, so it needs the source tree in place.
+      - name: Install Zig
+        # Deliberately no `version` here. setup-zig falls back to the
+        # minimum_zig_version field in build.zig.zon, currently "0.16.0", which
+        # keeps CI from becoming a second place to edit whenever that moves.
+        # It verifies the download against upstream's minisign key, and caches
+        # both the tarball and the Zig cache between runs; pass
+        # `use-cache: false` if Codeberg's cache backend causes trouble.
+        uses: https://codeberg.org/mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+
+      # The runner has no hidraw nodes, so the two tests that talk to hardware
+      # find nothing: "read-only ioctls against attached devices" reports
+      # SkipZigTest and "enumerate" iterates an empty directory. What this
+      # actually proves is that every declaration still compiles, which the
+      # refAllDecls tests reach even for methods no test calls. Run in each
+      # optimize mode: Debug and ReleaseSafe keep the safety checks that catch
+      # overflow and out-of-bounds access, while ReleaseFast drops them and can
+      # expose different behaviour.
+      - name: Test
+        run: |
+          zig version
+          zig build test -Doptimize=Debug --summary all
+          zig build test -Doptimize=ReleaseSafe --summary all
+          zig build test -Doptimize=ReleaseFast --summary all

@@ -4,6 +4,7 @@
 .{
     .name = .hidapi,
     .version = "0.0.3",
+    .minimum_zig_version = "0.16.0",
     .fingerprint = 0x274758e133e8ea3e,
     .dependencies = .{},
     .paths = .{
