@@ -79,10 +79,17 @@ pub fn build(b: *std.Build) void {
     docs_serve_step.dependOn(&run_docs_server.step);
 
     // The server has tests of its own; without this they would never run.
-    const docs_server_tests = b.addTest(
-        .{
-            .root_module = docs_server.root_module,
-        },
-    );
-    test_step.dependOn(&b.addRunArtifact(docs_server_tests).step);
+    // Only in a Debug build, though: its module is pinned to Debug whatever
+    // -Doptimize asks for, since it runs on the machine doing the build, so
+    // running it again under ReleaseSafe and ReleaseFast would test the same
+    // binary a second and third time. CI runs the suite in all three modes and
+    // this keeps the two release runs to the library itself.
+    if (optimize == .Debug) {
+        const docs_server_tests = b.addTest(
+            .{
+                .root_module = docs_server.root_module,
+            },
+        );
+        test_step.dependOn(&b.addRunArtifact(docs_server_tests).step);
+    }
 }
