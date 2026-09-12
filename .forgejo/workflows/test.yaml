@@ -17,51 +17,40 @@ on:
 
 jobs:
   reuse:
-    runs-on: codeberg-small
+    runs-on: nixos-do-s
     steps:
       - name: Check out
         uses: https://code.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Every file needs an SPDX header and every license a file in LICENSES/,
-      # which is easy to forget when adding one. reuse is a Python tool and the
-      # runner image ships pipx, so no install step of its own is needed. The
-      # major version is pinned so that a new REUSE specification cannot turn
-      # this red without a change here.
+      # which is easy to forget when adding one. The version that runs here is
+      # whatever the flake's nixpkgs pins, so it moves with `nix flake update`
+      # rather than with whatever a release of the tool does on its own.
       - name: Check REUSE compliance
-        run: pipx run --spec 'reuse>=6,<7' reuse lint
+        run: nix develop -c reuse lint
 
   test:
     # Gated on the licensing check, so a missing SPDX header fails without
-    # spending three compiler downloads and three builds on the run.
+    # spending three builds on the run.
     needs: reuse
-    runs-on: codeberg-small
-    # One job per optimize mode rather than three builds in sequence: a
-    # codeberg-small runner is capped at five minutes, which the three together
-    # were approaching. Each mode now gets its own budget and they run
-    # concurrently. The job appears once per mode, as `test (Debug)` and so on,
-    # and `needs: test` elsewhere waits for all of them.
+    runs-on: nixos-do-s
+    # One job per optimize mode rather than three builds in sequence, so the
+    # three run concurrently and each gets its own budget -- a droplet is
+    # reaped at a two hour lifetime cap, and a serial run spends that budget
+    # three times over on one machine. The job appears once per mode, as
+    # `test (Debug)` and so on, and `needs: test` elsewhere waits for all of
+    # them.
     strategy:
       matrix:
         optimize: [Debug, ReleaseSafe, ReleaseFast]
     steps:
       - name: Check out
-        # No `container:` override: the codeberg-small runner image already
-        # provides what the steps below need -- a node new enough for these
-        # JavaScript actions (checkout v5 and later declare a node24 runtime),
-        # and the xz that setup-zig shells out to when unpacking the compiler.
         uses: https://code.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Must follow the checkout: with no `version` given, setup-zig reads the
-      # version out of build.zig.zon, so it needs the source tree in place.
-      - name: Install Zig
-        # Deliberately no `version` here. setup-zig falls back to the
-        # minimum_zig_version field in build.zig.zon, currently "0.16.0", which
-        # keeps CI from becoming a second place to edit whenever that moves.
-        # It verifies the download against upstream's minisign key, and caches
-        # both the tarball and the Zig cache between runs; pass
-        # `use-cache: false` if Codeberg's cache backend causes trouble.
-        uses: https://codeberg.org/mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-
+      # No setup-zig step: the compiler comes from the flake's dev shell, which
+      # is the same one used locally, so CI cannot silently build with a
+      # different Zig than the one the tree was developed against.
+      #
       # The runner has no hidraw nodes, so the two tests that talk to hardware
       # find nothing: "read-only ioctls against attached devices" reports
       # SkipZigTest and "enumerate" iterates an empty directory. What this
@@ -75,12 +64,15 @@ jobs:
       # re-run the same host binary.
       - name: Test
         run: |
-          zig version
-          zig build test -Doptimize=${{ matrix.optimize }} --summary all
+          nix develop -c zig version
+          nix develop -c zig build test -Doptimize=${{ matrix.optimize }} --summary all
+
+      - name: Check Zig formatting compliance
+        run: nix develop -c zig fmt --check .
 
   docs:
     # Publishes the generated API reference to
-    # https://jcollie.codeberg.page/zig-hidapi/ .
+    # https://jeff.jcollie.page/zig-hidapi/ .
     #
     # This lives in the same workflow as the tests because `needs` only refers
     # to jobs within one workflow; a separate file could not wait on them. The
@@ -90,25 +82,23 @@ jobs:
     # ...and only from the default branch, or any pushed branch would publish
     # over the live site.
     if: ${{ forge.ref == 'refs/heads/main' }}
-    runs-on: codeberg-small
+    runs-on: nixos-do-s
     steps:
       - name: Check out
         uses: https://code.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install Zig
-        uses: https://codeberg.org/mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-
       - name: Build the API documentation
-        run: |
-          zig version
-          zig build docs
+        run: nix develop -c zig build docs
 
-      # git-pages resolves `v2` to a branch head, which moves; this is the
-      # v2.2.0 release commit, pinned like the other actions here. It commits
-      # the directory to the `pages` branch, which is what Codeberg serves.
-      - name: Publish to Codeberg Pages
-        uses: https://codeberg.org/git-pages/action@2b24bbb7ff943d3c8fe1df91326adec66daea6dd # v2.2.0
-        with:
-          site: https://${{ forge.repository_owner }}.codeberg.page/zig-hidapi/
-          token: ${{ forge.token }}
-          source: zig-out/docs/
+      # git-pages-cli uploads the directory to the pages server; nothing is
+      # committed back into the repository, so the ~17 MB of `sources.tar` that
+      # Zig's autodoc emits on every build does not accumulate in git history.
+      # `--upload-dir` is incremental, so a push that changed one file uploads
+      # one file. The site URL matches this repository, so the automatic
+      # Actions token authorizes it and no secret of its own is needed.
+      - name: Publish the API documentation
+        run: >
+          nix develop -c git-pages-cli https://jeff.jcollie.page/zig-hidapi/
+          --server jcollie.page
+          --token ${{ forge.token }}
+          --upload-dir zig-out/docs

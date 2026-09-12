@@ -36,7 +36,7 @@
 //! grants access; the README has one to copy.
 //!
 //! The source, the README with that rule, and the issue tracker are at
-//! [codeberg.org/jcollie/zig-hidapi](https://codeberg.org/jcollie/zig-hidapi).
+//! [git.jcollie.dev/jeff/zig-hidapi](https://git.jcollie.dev/jeff/zig-hidapi).
 
 const std = @import("std");
 

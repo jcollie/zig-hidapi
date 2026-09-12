@@ -28,7 +28,7 @@ is planned in the current design.
 Fetch the package into your `build.zig.zon`:
 
 ```sh
-zig fetch --save git+https://codeberg.org/jcollie/zig-hidapi.git
+zig fetch --save git+https://git.jcollie.dev/jeff/zig-hidapi.git
 ```
 
 Then wire the module up in `build.zig`:
@@ -150,11 +150,11 @@ std.debug.print("descriptor: {d} bytes\n", .{bytes.len});
 
 ## API overview
 
-The generated reference, covering every declaration with its doc comments, is
-published at [jcollie.codeberg.page/zig-hidapi][docs]. CI rebuilds it whenever
-`main` goes green. What follows is a summary.
+The full reference is generated from the doc comments in the source, covers
+every declaration, and is published at [jeff.jcollie.page/zig-hidapi][docs].
+CI rebuilds it whenever `main` goes green. What follows is a summary.
 
-[docs]: https://jcollie.codeberg.page/zig-hidapi/
+[docs]: https://jeff.jcollie.page/zig-hidapi/
 
 ### `hidapi.Device`
 
@@ -207,6 +207,22 @@ KERNEL=="hidraw*", ATTRS{idVendor}=="1234", ATTRS{idProduct}=="5678", MODE="0660
 Then `udevadm control --reload-rules && udevadm trigger`, and make sure your
 user is in the group you named.
 
+## Where this lives
+
+The repository is hosted on my Forgejo instance, which is where the issue
+tracker and CI are:
+
+```sh
+git clone https://git.jcollie.dev/jeff/zig-hidapi.git
+```
+
+The mirrors carry the same history and are there so that the code outlives any
+one host:
+
+- [tangled.org/jcollie.dev/zig-hidapi](https://tangled.org/jcollie.dev/zig-hidapi)
+- [codeberg.org/jcollie/zig-hidapi](https://codeberg.org/jcollie/zig-hidapi)
+- Radicle, as `rad:z2XSKZUPc81eR9a7RLZrJbZpkS4su` — see below
+
 ## Cloning with Radicle
 
 This repository is also published on [Radicle](https://radicle.xyz), a
@@ -249,8 +265,8 @@ authorizes changes to `main`.
 
 ## Development
 
-A Nix flake provides the toolchain (Zig 0.16, `reuse`, `pinact`, and the
-`rad` CLI):
+A Nix flake provides the toolchain (Zig 0.16, `reuse`, `pinact`,
+`git-pages-cli`, and the `rad` CLI):
 
 ```sh
 nix develop

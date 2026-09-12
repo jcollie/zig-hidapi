@@ -37,6 +37,7 @@
           default = pkgs.mkShell {
             name = "zig-hidapi";
             nativeBuildInputs = [
+              pkgs.git-pages-cli
               pkgs.pinact
               pkgs.radicle-node
               pkgs.reuse

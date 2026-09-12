@@ -8,7 +8,7 @@
 //! `DeviceInfo`. Nodes that do not exist, and nodes the caller may not open,
 //! are skipped, so an unprivileged process will usually see nothing at all;
 //! see the udev rule in
-//! [the README](https://codeberg.org/jcollie/zig-hidapi#user-content-permissions).
+//! [the README](https://git.jcollie.dev/jeff/zig-hidapi#user-content-permissions).
 //! Devices numbered beyond the last minor tried are not reported.
 //!
 //! Each `DeviceInfo` yielded carries the `Device` that was opened to read it.
