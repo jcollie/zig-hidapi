@@ -23,7 +23,7 @@ nothing: every buffer it needs is one the caller supplies.
 | Linux | `hidraw` and `/sys/class/hidraw` | supported |
 | FreeBSD | `hidraw(4)` | supported |
 | Windows | HIDCLASS through `NtDeviceIoControlFile` | supported |
-| macOS | IOKit `IOHIDManager` | planned |
+| macOS | IOKit `IOHIDManager` | supported |
 
 Building for a system with no backend is a compile error naming the ones there
 are, rather than a failure somewhere deeper.
@@ -33,6 +33,33 @@ On Windows every request goes through `NtDeviceIoControlFile` with the
 so reads are cancelable and can take a timeout. The Win32 declarations come
 from [zigwin32](https://github.com/marlersoft/zigwin32), which is the only
 dependency this library has and is fetched only when building for Windows.
+
+macOS is the one backend shaped differently from the inside, because the
+platform is: input reports arrive on a callback delivered by a `CFRunLoop`,
+whether anyone is reading or not, so an open device owns a task running that
+loop and a queue for what the callback delivers. Three things follow that a
+caller can see:
+
+- **`OpenOptions.input_queue` is required on macOS**, where the other three
+  backends ignore it. It is the buffer reports land in between reads, and it
+  is the caller's so that the library still allocates nothing.
+  `Device.takeDroppedReports` says how many were lost because it was full,
+  because losing input silently is worse than losing it loudly.
+- **Each open device holds one unit of concurrency** for its whole life, so an
+  `Io` with a bounded `concurrent_limit` can refuse to open one. That is why
+  `ConcurrencyUnavailable` is in `OpenError` on every target.
+- **Input Monitoring.** Since macOS 10.15, opening a HID device needs that
+  privacy permission, and without it `open` reports `error.AccessDenied`.
+  Enumeration does not need it. For a command-line program the grant attaches
+  to the terminal emulator rather than to your binary, and under a debugger it
+  is the debugger that must be granted, both of which surprise everyone the
+  first time. A daemon cannot show the consent dialog at all and has to be
+  pre-approved.
+
+Unlike the C hidapi, this library does **not** open devices exclusively by
+default. Seizing a device stops it working for everything else on the machine
+for as long as it is held; `OpenOptions.exclusive` asks for it when that is
+what you want.
 
 Two Windows limitations are worth knowing before you rely on them:
 

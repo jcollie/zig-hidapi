@@ -12,7 +12,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    configure(b, module);
+    configure(b, module, true);
 
     const unit_tests = b.addTest(
         .{
@@ -154,7 +154,7 @@ pub fn build(b: *std.Build) void {
 /// message, so a dependent that adds the module without going through this
 /// `build.zig` fails the same way and reads the same explanation, rather than
 /// getting a worse one from somewhere inside `Device`.
-fn configure(b: *std.Build, module: *std.Build.Module) void {
+fn configure(b: *std.Build, module: *std.Build.Module, link: bool) void {
     switch (module.resolved_target.?.result.os.tag) {
         // Every syscall goes through `std.os.linux`, so a Linux build links
         // no C at all. The other backends will not have that luxury: Zig 0.16
@@ -185,6 +185,22 @@ fn configure(b: *std.Build, module: *std.Build.Module) void {
             }
         },
 
+        // Like FreeBSD, Darwin has no raw-syscall layer in `std/os`, so it
+        // goes through `std.c`. IOKit is the only way to reach a HID device
+        // on macOS, and CoreFoundation comes with it.
+        //
+        // Linking a framework needs a macOS SDK, which a Linux machine does
+        // not have -- which is exactly why `check` below builds objects and
+        // never links. `link_libc` and the declarations themselves need no
+        // SDK at all, so the backend still compiles anywhere.
+        .macos, .ios, .tvos, .watchos, .visionos => {
+            module.link_libc = true;
+            if (link) {
+                module.linkFramework("CoreFoundation", .{});
+                module.linkFramework("IOKit", .{});
+            }
+        },
+
         else => {},
     }
 }
@@ -206,6 +222,8 @@ const checked_targets = [_]std.Target.Query{
     // the mingw `.def` files Zig ships.
     .{ .cpu_arch = .x86_64, .os_tag = .windows, .abi = .gnu },
     .{ .cpu_arch = .aarch64, .os_tag = .windows, .abi = .gnu },
+    .{ .cpu_arch = .x86_64, .os_tag = .macos },
+    .{ .cpu_arch = .aarch64, .os_tag = .macos },
 };
 
 /// A step that compiles the library for every supported target without
@@ -248,7 +266,10 @@ fn addCheckStep(
             .target = target,
             .optimize = optimize,
         });
-        configure(b, module);
+        // `link = false`: this module is compiled to an object and never
+        // linked, so asking for a framework here would fail on any machine
+        // without the SDK for it.
+        configure(b, module, false);
 
         check_step.dependOn(&b.addObject(.{
             .name = b.fmt("hidapi-{t}-{t}", .{ query.cpu_arch.?, query.os_tag.? }),

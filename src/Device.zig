@@ -223,6 +223,21 @@ pub fn getReportDescriptor(
     return dev.impl.getReportDescriptor(io, buf);
 }
 
+/// Input reports thrown away because the queue was full, since this was last
+/// asked, resetting the count.
+///
+/// Always zero on Linux, FreeBSD and Windows, where the kernel or the class
+/// driver does the queueing and this library never sees a full buffer. On
+/// macOS it is real: reports arrive on a callback whether anyone is reading or
+/// not, so a program that falls behind loses them.
+///
+/// This exists because losing input silently is worse than losing it loudly.
+/// The C hidapi caps its macOS queue at thirty reports and drops quietly,
+/// which turns "my program is too slow" into "my device is flaky".
+pub fn takeDroppedReports(dev: *Device) u64 {
+    return dev.impl.takeDroppedReports();
+}
+
 /// The largest report descriptor any device reports, so a buffer this size
 /// always holds one.
 pub const max_report_descriptor_len = backend.impl.max_report_descriptor_len;

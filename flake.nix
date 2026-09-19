@@ -25,7 +25,15 @@
         import nixpkgs {
           inherit system;
         };
+      # Packages and checks are Linux-only: the package builds the test
+      # binaries for the virtual machine test, and `pkgs.testers.runNixOSTest`
+      # cannot even be evaluated for Darwin.
       forAllSystems = lib.genAttrs linuxSystems;
+
+      # Dev shells are not. There is a macOS backend now, and a contributor on
+      # a Mac needs the same Zig and the same tools -- and is the only person
+      # who can actually run that backend.
+      forAllShells = lib.genAttrs lib.systems.flakeExposed;
     in
     {
       packages = forAllSystems (
@@ -53,7 +61,7 @@
         }
       );
 
-      devShells = forAllSystems (
+      devShells = forAllShells (
         system:
         let
           pkgs = makePackages system;

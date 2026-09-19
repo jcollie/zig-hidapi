@@ -20,6 +20,7 @@ pub const supported = [_]std.Target.Os.Tag{
     .linux,
     .freebsd,
     .windows,
+    .macos,
 };
 
 /// The backend for this target.
@@ -27,6 +28,7 @@ pub const impl = switch (builtin.os.tag) {
     .linux => @import("backend/linux.zig"),
     .freebsd => @import("backend/freebsd.zig"),
     .windows => @import("backend/windows.zig"),
+    .macos, .ios, .tvos, .watchos, .visionos => @import("backend/darwin.zig"),
     else => @compileError(unsupported),
 };
 
@@ -73,4 +75,6 @@ test {
     // parsing, which is what decides whether a device is skipped.
     _ = @import("backend/windows/ioctl.zig");
     _ = @import("backend/windows/path.zig");
+    _ = @import("backend/darwin/naming.zig");
+    _ = @import("backend/darwin/ReportQueue.zig");
 }

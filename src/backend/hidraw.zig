@@ -369,6 +369,13 @@ pub fn Device(comptime requests: Requests, comptime scope: @TypeOf(.enum_literal
             return buf[0..got];
         }
 
+        /// Always zero: `hidraw` queues input reports in the kernel -- 64 of
+        /// them on both systems -- so this library never has to drop one.
+        pub fn takeDroppedReports(self: *Self) u64 {
+            _ = self;
+            return 0;
+        }
+
         /// Map what `file_read_streaming` answers onto the portable read
         /// errors.
         ///

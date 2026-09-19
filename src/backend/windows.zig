@@ -349,6 +349,14 @@ pub const Device = struct {
         return buf[0..got];
     }
 
+    /// Always zero: HIDCLASS keeps the ring of input reports, which `open`
+    /// asks it to make 64 deep, and `read` takes from that directly rather
+    /// than queueing again in user space.
+    pub fn takeDroppedReports(self: *Device) u64 {
+        _ = self;
+        return 0;
+    }
+
     /// Always `error.Unsupported`; see the note at the top of this file.
     pub fn getReportDescriptorLen(self: *Device, io: std.Io) errors.DescriptorError!u32 {
         _ = .{ self, io };

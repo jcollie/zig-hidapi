@@ -34,6 +34,7 @@ pub const device_required = [_][]const u8{
     "read",
     "readTimeout",
     "write",
+    "takeDroppedReports",
 
     // Everything that goes over the control endpoint.
     "getFeatureReport",
