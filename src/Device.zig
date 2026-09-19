@@ -1,7 +1,13 @@
 // SPDX-FileCopyrightText: © 2024 Jeffrey C. Ollie <jeff@ocjtech.us>
 // SPDX-License-Identifier: MIT
 
-//! An open `hidraw` character device.
+//! An open HID device, and every operation on one.
+//!
+//! This is the portable half: it holds the conventions that are the same
+//! everywhere -- the report ID in the first byte, what an empty answer means,
+//! which errors callers see -- and forwards the system calls to the backend
+//! for the operating system being built for. `src/backend.zig` picks that
+//! backend and `src/backend/contract.zig` says what it has to provide.
 //!
 //! Every method takes a `std.Io` and dispatches its syscall through it rather
 //! than issuing it directly, which leaves the choice of how to wait up to the
@@ -14,17 +20,15 @@
 const Device = @This();
 
 const std = @import("std");
-const linux = std.os.linux;
 
-const log = std.log.scoped(.hidapi_device);
-
-const ioctl = @import("ioctl.zig");
+const backend = @import("backend.zig");
+const impl = backend.impl;
 const DeviceInfo = @import("DeviceInfo.zig");
 
 /// The minor number of the `hidraw` node, i.e. the `N` in `/dev/hidrawN`.
-minor: linux.dev_t,
-/// File descriptor for the open device.
-fd: linux.fd_t,
+minor: impl.Minor,
+/// Handle for the open device.
+fd: impl.Handle,
 
 /// Open `/dev/hidraw{minor}` for reading and writing.
 ///
@@ -34,99 +38,37 @@ fd: linux.fd_t,
 /// `error.HIDDeviceNoAccess` when the caller lacks permission to open it,
 /// which is the common case for an unprivileged process; see the udev rule
 /// in the README.
-pub fn open(io: std.Io, minor: linux.dev_t) !Device {
+pub fn open(io: std.Io, minor: impl.Minor) !Device {
     return .{
         .minor = minor,
-        .fd = fd: {
-            var p = try io.concurrent(_open, .{minor});
-            defer _ = p.cancel(io) catch {};
-            break :fd try p.await(io);
-        },
-    };
-}
-
-fn _open(minor: linux.dev_t) !linux.fd_t {
-    var buf: [std.Io.Dir.max_name_bytes]u8 = undefined;
-    const path = try std.fmt.bufPrintZ(&buf, "/dev/hidraw{d}", .{minor});
-
-    const rc = linux.open(
-        path,
-        .{
-            .ACCMODE = .RDWR,
-            .APPEND = true,
-            .NONBLOCK = false,
-        },
-        0,
-    );
-    return switch (linux.errno(rc)) {
-        .SUCCESS => @as(linux.fd_t, @intCast(rc)),
-        .ACCES => return error.HIDDeviceNoAccess,
-        .NOENT => return error.HIDDeviceDoesNotExist,
-        else => {
-            return error.HIDDeviceUnknownOpenError;
-        },
+        .fd = try impl.open(io, minor),
     };
 }
 
 /// Close the device. Errors are not reported.
 pub fn close(self: Device, io: std.Io) void {
-    var p = io.concurrent(_close, .{self.fd}) catch return;
-    defer p.cancel(io);
-    p.await(io);
-}
-
-fn _close(fd: linux.fd_t) void {
-    _ = linux.close(fd);
+    impl.close(io, self.fd);
 }
 
 /// Get the size in bytes of the device's HID report descriptor.
 ///
-/// Never exceeds `ioctl.HID_MAX_DESCRIPTOR_SIZE`.
+/// Never exceeds `max_report_descriptor_size`.
 pub fn getReportDescriptorSize(self: Device, io: std.Io) !u32 {
-    var report_descriptor_size: u32 = 0;
-    const rc = try ioctl.ioctl(
-        io,
-        self.fd,
-        ioctl.HIDIOCGRDESCSIZE,
-        @intFromPtr(&report_descriptor_size),
-    );
-    switch (rc) {
-        .success => {
-            return report_descriptor_size;
-        },
-        .failure => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+    return impl.getReportDescriptorSize(io, self.fd);
 }
+
+/// The largest report descriptor any device will report, so a buffer this
+/// size always holds one.
+pub const max_report_descriptor_size = impl.max_report_descriptor_len;
 
 /// Copy the device's HID report descriptor into `buf` and return the
 /// portion written.
 ///
 /// Returns `error.BufferTooSmall` if `buf` is shorter than the descriptor;
 /// size it with `getReportDescriptorSize`, or use
-/// `ioctl.HID_MAX_DESCRIPTOR_SIZE` to be sure it always fits.
+/// `max_report_descriptor_size` to be sure it always fits.
 pub fn getReportDescriptor(self: Device, io: std.Io, buf: []u8) ![]const u8 {
-    const size = try self.getReportDescriptorSize(io);
-    if (buf.len < size) return error.BufferTooSmall;
-    var report_descriptor: ioctl.hidraw_report_descriptor = .init(size);
-    const rc = try ioctl.ioctl(
-        io,
-        self.fd,
-        ioctl.HIDIOCGRDESC,
-        @intFromPtr(&report_descriptor),
-    );
-    switch (rc) {
-        .success => {
-            @memcpy(buf[0..size], report_descriptor.value[0..size]);
-            return buf[0..size];
-        },
-        .failure => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+    return impl.getReportDescriptor(io, self.fd, buf);
 }
 
 /// Get the device's vendor and product strings, UTF-8 encoded.
@@ -136,35 +78,8 @@ pub fn getReportDescriptor(self: Device, io: std.Io, buf: []u8) ![]const u8 {
 ///
 /// Returns `error.BufferTooSmall` if `buf` cannot hold the name and its
 /// terminator. 256 bytes is enough for any name the kernel will report.
-///
-/// Returns `error.BufferTooLarge` if `buf` is longer than a request number
-/// can name, which no useful buffer is; see `ioctl.Size`.
 pub fn getRawName(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
-    const request_len = std.math.cast(ioctl.Size, buf.len) orelse
-        return error.BufferTooLarge;
-    const rc = try ioctl.ioctl(
-        io,
-        self.fd,
-        ioctl.HIDIOCGRAWNAME(request_len),
-        @intFromPtr(buf.ptr),
-    );
-    switch (rc) {
-        .success => |len| {
-            // A zero length means `buf` was empty, and a lone terminator means
-            // the string was. A single byte that is not the terminator is a
-            // string the buffer could not hold, which the check below catches.
-            if (len == 0 or (len == 1 and buf[0] == 0)) return null;
-            // The ioctl clamps its copy to `buf.len` and does not terminate a
-            // name it had to truncate, so a missing terminator means the name
-            // did not fit.
-            if (buf[len - 1] != 0) return error.BufferTooSmall;
-            return buf[0 .. len - 1 :0];
-        },
-        .failure => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+    return impl.getRawName(io, self.fd, buf);
 }
 
 /// Get the device's `uniq` string, an identifier meant to be unique to the
@@ -179,35 +94,8 @@ pub fn getRawName(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
 /// Returns `error.BufferTooSmall` if `buf` cannot hold the string and its
 /// terminator. The kernel keeps `uniq` in a 64 byte field, so a 64 byte
 /// buffer always fits.
-///
-/// Returns `error.BufferTooLarge` if `buf` is longer than a request number
-/// can name, which no useful buffer is; see `ioctl.Size`.
 pub fn getRawUniq(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
-    const request_len = std.math.cast(ioctl.Size, buf.len) orelse
-        return error.BufferTooLarge;
-    const rc = try ioctl.ioctl(
-        io,
-        self.fd,
-        ioctl.HIDIOCGRAWUNIQ(request_len),
-        @intFromPtr(buf.ptr),
-    );
-    switch (rc) {
-        .success => |len| {
-            // A zero length means `buf` was empty, and a lone terminator means
-            // the string was. A single byte that is not the terminator is a
-            // string the buffer could not hold, which the check below catches.
-            if (len == 0 or (len == 1 and buf[0] == 0)) return null;
-            // The ioctl clamps its copy to `buf.len` and does not terminate a
-            // name it had to truncate, so a missing terminator means the name
-            // did not fit.
-            if (buf[len - 1] != 0) return error.BufferTooSmall;
-            return buf[0 .. len - 1 :0];
-        },
-        .failure => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+    return impl.getRawUniq(io, self.fd, buf);
 }
 
 /// Get a string describing the physical address of the device.
@@ -217,117 +105,36 @@ pub fn getRawUniq(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
 ///
 /// Returns `null` when the device reports no location. Otherwise the result
 /// aliases `buf` and is NUL terminated.
-///
-/// Returns `error.BufferTooSmall` if `buf` cannot hold the string and its
-/// terminator, and `error.BufferTooLarge` if `buf` is longer than a request
-/// number can name; see `ioctl.Size`.
 pub fn getPhysicalLocation(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
-    const request_len = std.math.cast(ioctl.Size, buf.len) orelse
-        return error.BufferTooLarge;
-    const rc = try ioctl.ioctl(
-        io,
-        self.fd,
-        ioctl.HIDIOCGRAWPHYS(request_len),
-        @intFromPtr(buf.ptr),
-    );
-    switch (rc) {
-        .success => |len| {
-            // A zero length means `buf` was empty, and a lone terminator means
-            // the string was. A single byte that is not the terminator is a
-            // string the buffer could not hold, which the check below catches.
-            if (len == 0 or (len == 1 and buf[0] == 0)) return null;
-            // See the note in `getRawName`; this ioctl truncates the same way.
-            if (buf[len - 1] != 0) return error.BufferTooSmall;
-            return buf[0 .. len - 1 :0];
-        },
-        .failure => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+    return impl.getPhysicalLocation(io, self.fd, buf);
 }
 
-/// Get the device's bus type, vendor ID and product ID in a single ioctl.
+/// Get the device's bus type, vendor ID and product ID in a single call.
 ///
 /// The returned `DeviceInfo` carries this device, which the caller still
 /// owns. Prefer this over calling `getBusType`, `getVendorID` and
-/// `getProductID` separately, since each of those repeats the same ioctl.
+/// `getProductID` separately, since each of those repeats the same work.
 pub fn getDeviceInfo(self: Device, io: std.Io) !DeviceInfo {
-    var info = std.mem.zeroes(ioctl.hidraw_devinfo);
-    const rc = try ioctl.ioctl(
-        io,
-        self.fd,
-        ioctl.HIDIOCGRAWINFO,
-        @intFromPtr(&info),
-    );
-    switch (rc) {
-        .success => {
-            return .init(self, &info);
-        },
-        .failure => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+    const info = try impl.getDeviceInfo(io, self.fd);
+    return .init(self, &info);
 }
 
 /// Get the bus the device is attached to.
 ///
-/// `ioctl.BUS` is non-exhaustive, because the kernel may report a bus this
-/// library does not name yet.
-pub fn getBusType(self: Device, io: std.Io) !ioctl.BUS {
-    var info: ioctl.hidraw_devinfo = .init;
-    const rc = try ioctl.ioctl(
-        io,
-        self.fd,
-        ioctl.HIDIOCGRAWINFO,
-        @intFromPtr(&info),
-    );
-    switch (rc) {
-        .success => return info.bustype,
-        .failure => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+/// `BUS` is non-exhaustive, because the system may report a bus this library
+/// does not name yet.
+pub fn getBusType(self: Device, io: std.Io) !impl.BUS {
+    return (try impl.getDeviceInfo(io, self.fd)).bustype;
 }
 
 /// Get the device's vendor ID (VID).
 pub fn getVendorID(self: Device, io: std.Io) !u16 {
-    var info: ioctl.hidraw_devinfo = .init;
-    const rc = try ioctl.ioctl(
-        io,
-        self.fd,
-        ioctl.HIDIOCGRAWINFO,
-        @intFromPtr(&info),
-    );
-    switch (rc) {
-        .success => return info.vendor,
-        .failure => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+    return (try impl.getDeviceInfo(io, self.fd)).vendor;
 }
 
 /// Get the device's product ID (PID).
 pub fn getProductID(self: Device, io: std.Io) !u16 {
-    var info: ioctl.hidraw_devinfo = .init;
-    const rc = try ioctl.ioctl(
-        io,
-        self.fd,
-        ioctl.HIDIOCGRAWINFO,
-        @intFromPtr(&info),
-    );
-    switch (rc) {
-        .success => {
-            return info.product;
-        },
-        .failure => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+    return (try impl.getDeviceInfo(io, self.fd)).product;
 }
 
 /// Send a Feature report to the device.
@@ -341,27 +148,8 @@ pub fn getProductID(self: Device, io: std.Io) !u16 {
 /// passed to sendFeatureReport(): the Report ID (or 0x0, for devices which do
 /// not use numbered reports), followed by the report data (16 bytes). In this
 /// example, the length passed in would be 17.
-///
-/// Returns `error.BufferTooLarge` if `data` is longer than a request number
-/// can name; see `ioctl.Size`.
 pub fn sendFeatureReport(self: Device, io: std.Io, data: []const u8) !usize {
-    const request_len = std.math.cast(ioctl.Size, data.len) orelse
-        return error.BufferTooLarge;
-    const rc = try ioctl.ioctl(
-        io,
-        self.fd,
-        ioctl.HIDIOCSFEATURE(request_len),
-        @intFromPtr(data.ptr),
-    );
-    switch (rc) {
-        .success => |size| {
-            return size;
-        },
-        .failure => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+    return impl.sendFeatureReport(io, self.fd, data);
 }
 
 /// Get a feature report from a HID device.
@@ -370,52 +158,18 @@ pub fn sendFeatureReport(self: Device, io: std.Io, data: []const u8) !usize {
 /// sure to allow space for this extra byte in `buf`. Upon return, the first
 /// byte will still contain the Report ID, and the report data will start in
 /// buf[1].
-///
-/// Returns `error.BufferTooLarge` if `buf` is longer than a request number
-/// can name; see `ioctl.Size`.
 pub fn getFeatureReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
-    const request_len = std.math.cast(ioctl.Size, buf.len) orelse
-        return error.BufferTooLarge;
-    const rc = try ioctl.ioctl(
-        io,
-        self.fd,
-        ioctl.HIDIOCGFEATURE(request_len),
-        @intFromPtr(buf.ptr),
-    );
-    switch (rc) {
-        .success => |len| return buf[0..len],
-        .failure => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+    return impl.getFeatureReport(io, self.fd, buf);
 }
 
-/// Get a input report from a HID device.
+/// Get an input report from a HID device.
 ///
 /// Set the first byte of `buf` to the report ID of the report to be read. Make
 /// sure to allow space for this extra byte in `buf`. Upon return, the first
 /// byte will still contain the report ID, and the report data will start in
 /// `buf[1]`.
-///
-/// Returns `error.BufferTooLarge` if `buf` is longer than a request number
-/// can name; see `ioctl.Size`.
 pub fn getInputReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
-    const request_len = std.math.cast(ioctl.Size, buf.len) orelse
-        return error.BufferTooLarge;
-    const rc = try ioctl.ioctl(
-        io,
-        self.fd,
-        ioctl.HIDIOCGINPUT(request_len),
-        @intFromPtr(buf.ptr),
-    );
-    switch (rc) {
-        .success => |len| return buf[0..len],
-        .failure => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+    return impl.getInputReport(io, self.fd, buf);
 }
 
 /// Write an output report to a HID device.
@@ -431,20 +185,7 @@ pub fn getInputReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
 /// write() will send the data on the first OUT endpoint, if one exists. If it
 /// does not, it will send the data through the Control Endpoint (Endpoint 0).
 pub fn write(self: Device, io: std.Io, buf: []const u8) !usize {
-    var p = try io.concurrent(_write, .{ self.fd, buf });
-    defer _ = p.cancel(io) catch {};
-    return try p.await(io);
-}
-
-fn _write(fd: linux.fd_t, data: []const u8) !usize {
-    const rc = linux.write(fd, data.ptr, data.len);
-    switch (linux.errno(rc)) {
-        .SUCCESS => return rc,
-        else => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+    return impl.write(io, self.fd, buf);
 }
 
 /// Read an input report from a HID device.
@@ -457,22 +198,7 @@ fn _write(fd: linux.fd_t, data: []const u8) !usize {
 /// a report. A device that is simply idle, such as a mouse nobody is touching,
 /// will not return from this call.
 pub fn read(self: Device, io: std.Io, data: []u8) ![]const u8 {
-    var p = try io.concurrent(_read, .{ self.fd, data });
-    defer _ = p.cancel(io) catch {};
-    return p.await(io);
-}
-
-fn _read(fd: linux.fd_t, data: []u8) ![]const u8 {
-    const rc = linux.read(fd, data.ptr, data.len);
-    switch (linux.errno(rc)) {
-        .SUCCESS => {
-            return data[0..rc];
-        },
-        else => |e| {
-            log.warn("problem: {s}", .{@tagName(e)});
-            return error.HIDError;
-        },
-    }
+    return impl.read(io, self.fd, data);
 }
 
 test {
@@ -487,7 +213,7 @@ test "read-only ioctls against attached devices" {
     const io = std.testing.io;
 
     var buf: [256]u8 = undefined;
-    var descriptor: [ioctl.HID_MAX_DESCRIPTOR_SIZE]u8 = undefined;
+    var descriptor: [max_report_descriptor_size]u8 = undefined;
     var checked: usize = 0;
 
     for (0..64) |minor| {
@@ -518,7 +244,7 @@ test "read-only ioctls against attached devices" {
         }
 
         const size = try device.getReportDescriptorSize(io);
-        try std.testing.expect(size <= ioctl.HID_MAX_DESCRIPTOR_SIZE);
+        try std.testing.expect(size <= max_report_descriptor_size);
         const bytes = try device.getReportDescriptor(io, descriptor[0..size]);
         try std.testing.expectEqual(@as(usize, size), bytes.len);
 

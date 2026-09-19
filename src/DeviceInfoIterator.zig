@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2024 Jeffrey C. Ollie <jeff@ocjtech.us>
 // SPDX-License-Identifier: MIT
 
-//! An iterator over the `hidraw` devices attached to the system.
+//! An iterator over the HID devices attached to the system.
 //!
 //! There is no enumeration ioctl, so this walks the minor numbers `0` through
 //! `63` in order, opening `/dev/hidraw{minor}` and asking each one for its
@@ -18,16 +18,18 @@
 const DeviceInfoIterator = @This();
 
 const std = @import("std");
-const linux = std.os.linux;
 
 const log = std.log.scoped(.device_info_iterator);
 
-const hidapi = @import("hidapi.zig");
+const impl = @import("backend.zig").impl;
 const Device = @import("Device.zig");
 const DeviceInfo = @import("DeviceInfo.zig");
 
+/// One past the last minor number tried.
+const limit = 64;
+
 /// The next minor number to try, i.e. the `N` in `/dev/hidrawN`.
-index: linux.dev_t = 0,
+index: impl.Minor = 0,
 
 /// An iterator positioned before the first device.
 pub const init: DeviceInfoIterator = .{};
@@ -42,8 +44,7 @@ pub const init: DeviceInfoIterator = .{};
 /// The `Device` inside the returned `DeviceInfo` is open, and belongs to the
 /// caller from here on.
 pub fn next(self: *DeviceInfoIterator, io: std.Io) !?DeviceInfo {
-    if (self.index >= 64) return null;
-    while (self.index < 64) {
+    while (self.index < limit) {
         defer self.index += 1;
         const device = Device.open(io, self.index) catch continue;
         // An errdefer would not fire here, because failing to query the
@@ -67,7 +68,7 @@ test "enumerate" {
         var buf: [256]u8 = undefined;
         {
             const name = try d.getPhysicalLocation(io, &buf) orelse "(unknown)";
-            log.info("name: {d} {s}", .{ d.minor, name });
+            log.info("phys: {d} {s}", .{ d.minor, name });
         }
         {
             const name = try d.getRawName(io, &buf) orelse "(unnamed)";

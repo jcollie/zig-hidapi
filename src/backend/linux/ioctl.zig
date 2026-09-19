@@ -9,10 +9,11 @@
 //! request numbers are the kernel's own text from
 //! https://docs.kernel.org/hid/hidraw.html.
 //!
-//! This file is not exported from the root module. Three of its declarations
-//! nonetheless reach `Device`'s callers: `BUS`, as the type of the bus a
-//! device is attached to, `HID_MAX_DESCRIPTOR_SIZE`, as a buffer size that
-//! always suffices, and `Size`, as the bound a buffer length has to fit.
+//! Nothing outside the Linux backend imports this file. Two of its
+//! declarations nonetheless reach `Device`'s callers, re-exported by
+//! `backend/linux.zig` under portable names: `BUS`, as the type of the bus a
+//! device is attached to, and `HID_MAX_DESCRIPTOR_SIZE`, as a buffer size that
+//! always suffices. `Size` is the bound a buffer length has to fit.
 //!
 //! Requests that carry a caller supplied buffer are functions rather than
 //! constants, because the buffer length is encoded in the request number
