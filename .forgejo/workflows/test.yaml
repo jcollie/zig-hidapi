@@ -70,6 +70,20 @@ jobs:
       - name: Check Zig formatting compliance
         run: nix develop -c zig fmt --check .
 
+  check:
+    # Compiles the library for every supported target without linking it, so
+    # that a backend nobody on this runner can execute still has to compile.
+    # Debug only: this proves compilation rather than behaviour, so running it
+    # once per optimize mode would buy nothing.
+    needs: reuse
+    runs-on: nixos-do-s
+    steps:
+      - name: Check out
+        uses: https://code.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Compile for every supported target
+        run: nix develop -c zig build check --summary all
+
   vm:
     # The only job that proves anything about behaviour rather than about
     # compilation. A runner has no HID hardware, so `zig build test` above
@@ -98,7 +112,7 @@ jobs:
     # to jobs within one workflow; a separate file could not wait on them. The
     # tests have to be green first, so a build that no longer compiles never
     # replaces the published documentation.
-    needs: [test, vm]
+    needs: [check, test, vm]
     # ...and only from the default branch, or any pushed branch would publish
     # over the live site.
     if: ${{ forge.ref == 'refs/heads/main' }}

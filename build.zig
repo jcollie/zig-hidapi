@@ -12,6 +12,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    configure(module);
 
     const unit_tests = b.addTest(
         .{
@@ -115,6 +116,8 @@ pub fn build(b: *std.Build) void {
     const docs_serve_step = b.step("docs-serve", "Serve the API documentation over HTTP");
     docs_serve_step.dependOn(&run_docs_server.step);
 
+    addCheckStep(b, optimize, docs_server);
+
     // The server has tests of its own; without this they would never run.
     // Only in a Debug build, though: its module is pinned to Debug whatever
     // -Doptimize asks for, since it runs on the machine doing the build, so
@@ -129,4 +132,79 @@ pub fn build(b: *std.Build) void {
         );
         test_step.dependOn(&b.addRunArtifact(docs_server_tests).step);
     }
+}
+
+/// Everything about the module that depends on which operating system it is
+/// being built for.
+///
+/// Called once for the published module and once per target in the `check`
+/// step below, so that what CI compiles and what a dependent compiles cannot
+/// drift apart.
+///
+/// Note what is deliberately *not* here: an unsupported operating system is
+/// not a `@compileError` in this file. `src/backend.zig` produces that
+/// message, so a dependent that adds the module without going through this
+/// `build.zig` fails the same way and reads the same explanation, rather than
+/// getting a worse one from somewhere inside `Device`.
+fn configure(module: *std.Build.Module) void {
+    switch (module.resolved_target.?.result.os.tag) {
+        // Every syscall goes through `std.os.linux`, so a Linux build links
+        // no C at all. The other backends will not have that luxury: Zig 0.16
+        // ships no raw-syscall layer for FreeBSD or Darwin, and Windows has
+        // none to ship.
+        .linux => {},
+        else => {},
+    }
+}
+
+/// The targets `zig build check` compiles for.
+///
+/// Two architectures per system, not one. The ioctl request number's length
+/// field is 14 bits on most architectures and 13 on the ones that spend an
+/// extra bit on the direction, and pointer width varies, so a backend can
+/// compile on one and not the other.
+const checked_targets = [_]std.Target.Query{
+    .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .gnu },
+    .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .musl },
+};
+
+/// A step that compiles the library for every supported target without
+/// linking it.
+///
+/// `addObject` rather than `addExecutable` or a linked library, and that is
+/// the whole trick: no linker runs, so no framework, no import library and no
+/// platform SDK has to be present. A Linux machine can therefore prove that
+/// the Darwin backend still compiles, which it could not do any other way --
+/// `zig build-lib -target aarch64-macos -framework IOKit` fails with "unable
+/// to find framework 'IOKit'" unless a macOS SDK is in reach, while the same
+/// build as an object succeeds.
+///
+/// What it does not prove is that the symbols exist. A misspelled
+/// `IOHIDDeviceOpen` compiles here and fails to link on a Mac, which is what
+/// the macOS and Windows runners on the GitHub mirror are for.
+fn addCheckStep(
+    b: *std.Build,
+    optimize: std.builtin.OptimizeMode,
+    docs_server: *std.Build.Step.Compile,
+) void {
+    const check_step = b.step("check", "Compile for every supported target without linking");
+
+    for (checked_targets) |query| {
+        const target = b.resolveTargetQuery(query);
+        const module = b.createModule(.{
+            .root_source_file = b.path("src/hidapi.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        configure(module);
+
+        check_step.dependOn(&b.addObject(.{
+            .name = b.fmt("hidapi-{t}-{t}", .{ query.cpu_arch.?, query.os_tag.? }),
+            .root_module = module,
+        }).step);
+    }
+
+    // Nothing else builds the documentation server except `docs-serve`, so
+    // without this it can stop compiling and no test notices.
+    check_step.dependOn(&docs_server.step);
 }

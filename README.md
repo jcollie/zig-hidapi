@@ -357,9 +357,18 @@ Build and test:
 ```sh
 zig build
 zig build test
+zig build check       # compile for every supported target, without linking
 zig build docs        # API reference into zig-out/docs
 zig build docs-serve  # ...and serve it at http://127.0.0.1:8000/
 ```
+
+`check` compiles the library as an object for each supported target and two
+architectures apiece. Building an object rather than linking one is what lets
+a Linux machine compile a backend it could never link — no framework, import
+library or platform SDK has to be present — so it is the cheap way to keep
+every backend honest from one workstation. What it cannot prove is that the
+symbols a backend names actually exist, which is why CI also runs the suite on
+macOS and Windows runners.
 
 The documentation is a WebAssembly viewer that fetches `sources.tar`, so it has
 to be served over HTTP; opening `zig-out/docs/index.html` from the filesystem
