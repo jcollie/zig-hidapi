@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: © 2026 Jeffrey C. Ollie <jeff@ocjtech.us>
+# SPDX-License-Identifier: MIT
+
+# The GitHub mirror exists for these two runners.
+#
+# Forgejo is where this repository lives and where the real CI is; what it
+# cannot do is run a macOS or a Windows machine. `zig build check` on the
+# Forgejo side proves every backend still *compiles*, which is the cheap half.
+# This is the other half: it links and executes them, which is the only way to
+# catch a symbol that does not exist in IOKit, a calling convention written
+# down wrongly, or a structure laid out differently than declared.
+#
+# There is no HID hardware on a hosted runner, so the tests that want a device
+# report SkipZigTest. What runs is every unit test -- the control codes, the
+# path parsing, the report queue, the descriptor walker -- plus enumeration
+# against an empty machine, which is worth having: enumerating nothing is a
+# path that has to work and is easy to get wrong.
+#
+# Actions are pinned to a commit with the tag they came from in a trailing
+# comment, so that a moving tag cannot change what CI executes.
+
+name: test
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      # Not fail-fast: when something breaks on one platform it is useful to
+      # know at once whether it broke on the others too.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # No Nix here, unlike the Forgejo workflow, so the compiler comes from
+      # an action instead of from the flake's dev shell. The version is pinned
+      # to the same one `build.zig.zon` requires.
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Test
+        run: zig build test --summary all
+
+      - name: Build for every supported target
+        run: zig build check --summary all
