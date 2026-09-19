@@ -122,6 +122,42 @@ pub fn read(dev: *Device, io: std.Io, buf: []u8) errors.ReadError![]u8 {
     return dev.impl.read(io, buf);
 }
 
+/// Read an input report, giving up after `timeout`.
+///
+/// Returns `null` when nothing arrived in time. Since `std.Io.Timeout` can be
+/// a zero duration, that also covers a non-blocking poll:
+///
+/// ```
+/// // Block for at most 250 ms.
+/// const report = try dev.readTimeout(io, &buf, .{
+///     .duration = .{ .raw = .fromMilliseconds(250), .clock = .awake },
+/// });
+///
+/// // Take whatever is already waiting, and do not wait.
+/// const now = try dev.readTimeout(io, &buf, .{
+///     .duration = .{ .raw = .zero, .clock = .awake },
+/// });
+/// ```
+///
+/// There is deliberately no non-blocking *mode* to set, the way the C hidapi
+/// has one. A mode is a second way of saying what the timeout already says,
+/// and it is state every backend would have to honour on every read path.
+///
+/// `null` and a zero-length report are different answers: a HID device may
+/// legitimately send a report with no data, so the two cannot share a
+/// representation. Taking a `Timeout` rather than a count of milliseconds
+/// matters for the same reason it does elsewhere in `std.Io` -- a caller
+/// polling several devices against one deadline says so once, instead of
+/// recomputing a remaining duration per device and drifting.
+pub fn readTimeout(
+    dev: *Device,
+    io: std.Io,
+    buf: []u8,
+    timeout: std.Io.Timeout,
+) errors.ReadError!?[]u8 {
+    return dev.impl.readTimeout(io, buf, timeout);
+}
+
 /// Write an output report.
 ///
 /// The first byte of `report` is the report ID, `0x00` for a device that does

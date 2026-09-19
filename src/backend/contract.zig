@@ -32,6 +32,7 @@ pub const device_required = [_][]const u8{
 
     // The two endpoints that carry reports without a control transfer.
     "read",
+    "readTimeout",
     "write",
 
     // Everything that goes over the control endpoint.

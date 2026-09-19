@@ -23,6 +23,7 @@ const ioctl = @import("linux/ioctl.zig");
 const sysfs = @import("linux/sysfs.zig");
 
 const descriptor = @import("../descriptor.zig");
+const io_op = @import("../io_op.zig");
 const errors = @import("../errors.zig");
 const DeviceId = @import("../DeviceId.zig");
 const DeviceInfo = @import("../DeviceInfo.zig");
@@ -50,6 +51,24 @@ fn mapErrno(what: []const u8, e: linux.E) errors.DeviceError {
         .NODEV, .SHUTDOWN, .IO => error.DeviceDisconnected,
         .NOMEM, .MFILE, .NFILE => error.SystemResources,
         else => error.DeviceRefused,
+    };
+}
+
+/// Map what `file_read_streaming` answers onto the portable read errors.
+///
+/// `EndOfStream` is the interesting one. A hidraw descriptor whose device has
+/// been unplugged reads zero bytes rather than failing, which is how a read
+/// loop finds out the device is gone -- and it has to be told apart from a
+/// legitimately empty report, which a device may also send.
+fn mapRead(result: std.Io.Operation.FileReadStreaming.Result) errors.ReadError!usize {
+    return result catch |err| {
+        log.warn("read: {s}", .{@errorName(err)});
+        return switch (err) {
+            error.EndOfStream, error.InputOutput, error.Unexpected => error.DeviceDisconnected,
+            error.AccessDenied, error.NotOpenForReading => error.AccessDenied,
+            error.SystemResources => error.SystemResources,
+            else => error.DeviceRefused,
+        };
     };
 }
 
@@ -87,22 +106,72 @@ pub const Device = struct {
         self.fd = -1;
     }
 
-    /// Read an input report from the interrupt IN endpoint.
+    /// The device as `std.Io` sees it.
     ///
-    /// The device is opened in blocking mode, so this waits until the device
-    /// sends a report.
+    /// `nonblocking` tracks how the descriptor was actually opened, because
+    /// `Io` branches on it: claiming a blocking descriptor is non-blocking is
+    /// documented as unrecoverable in `Io.Threaded`, not merely wrong.
+    fn file(self: *const Device) std.Io.File {
+        return .{ .handle = self.fd, .flags = .{ .nonblocking = false } };
+    }
+
+    /// Read an input report from the interrupt IN endpoint, waiting until the
+    /// device sends one.
     pub fn read(self: *Device, io: std.Io, buf: []u8) errors.ReadError![]u8 {
-        var p = io.concurrent(_read, .{ self.fd, buf }) catch return error.SystemResources;
-        defer _ = p.cancel(io) catch {};
-        return p.await(io);
+        const result = try io.operate(.{ .file_read_streaming = .{
+            .file = self.file(),
+            .data = &.{buf},
+        } });
+        return buf[0..try mapRead(result.file_read_streaming)];
+    }
+
+    /// Read an input report, giving up after `timeout`.
+    ///
+    /// `null` means nothing arrived in time. A zero duration therefore makes
+    /// this a non-blocking poll, which is why there is no separate
+    /// non-blocking mode to set: a mode flag would be a second way to express
+    /// something the timeout already says, and every backend would have to
+    /// honour both.
+    ///
+    /// Note that `null` and a zero-length report are different answers. A HID
+    /// device may legitimately send a report with no data, so the two cannot
+    /// share a representation.
+    pub fn readTimeout(
+        self: *Device,
+        io: std.Io,
+        buf: []u8,
+        timeout: std.Io.Timeout,
+    ) errors.ReadError!?[]u8 {
+        // `Io.Threaded` polls the descriptor with a deadline before it issues
+        // the read, so this is a real timeout on a blocking descriptor and
+        // needs no `O_NONBLOCK`; `Io.Uring` submits it as a linked timeout.
+        const result = io_op.operateTimeout(io, .{ .file_read_streaming = .{
+            .file = self.file(),
+            .data = &.{buf},
+        } }, timeout) catch |err| switch (err) {
+            error.Timeout => return null,
+            error.Canceled => return error.Canceled,
+            error.ConcurrencyUnavailable => return error.SystemResources,
+        };
+        return buf[0..try mapRead(result.file_read_streaming)];
     }
 
     /// Write an output report to the first OUT endpoint, or to the control
     /// endpoint when the device has none.
     pub fn write(self: *Device, io: std.Io, data: []const u8) errors.WriteError!usize {
-        var p = io.concurrent(_write, .{ self.fd, data }) catch return error.SystemResources;
-        defer _ = p.cancel(io) catch {};
-        return try p.await(io);
+        const result = try io.operate(.{ .file_write_streaming = .{
+            .file = self.file(),
+            .data = &.{data},
+        } });
+        return result.file_write_streaming catch |err| {
+            log.warn("write: {s}", .{@errorName(err)});
+            return switch (err) {
+                error.AccessDenied => error.AccessDenied,
+                error.SystemResources => error.SystemResources,
+                error.InputOutput, error.Unexpected => error.DeviceDisconnected,
+                else => error.DeviceRefused,
+            };
+        };
     }
 
     /// Issue `request` with `arg`, reporting a failing syscall through
@@ -114,18 +183,17 @@ pub const Device = struct {
         request: u32,
         arg: usize,
     ) (errors.DeviceError || std.Io.Cancelable)!usize {
-        const result = ioctl.ioctl(io, self.fd, request, arg) catch |err| switch (err) {
-            error.Canceled => return error.Canceled,
-            // The caller's `Io` had no unit of concurrency to give. From here
-            // that is a resource shortage like any other, and reporting it as
-            // one keeps a failure mode that only some `Io` implementations
-            // have out of every error set in the library.
-            error.ConcurrencyUnavailable => return error.SystemResources,
-        };
-        switch (result) {
-            .success => |rc| return rc,
-            .failure => |e| return mapErrno(what, e),
+        const result = try io.operate(.{ .device_io_control = .{
+            .file = self.file(),
+            .code = request,
+            .arg = @ptrFromInt(arg),
+        } });
+        // The POSIX arm of `device_io_control` hands back what `ioctl`
+        // returned, with a negative value carrying the negated `errno`.
+        if (result.device_io_control < 0) {
+            return mapErrno(what, @enumFromInt(-result.device_io_control));
         }
+        return @intCast(result.device_io_control);
     }
 
     /// The shared body of the three string ioctls.
@@ -270,24 +338,6 @@ fn _open(id: DeviceId) errors.OpenError!linux.fd_t {
 
 fn _close(fd: linux.fd_t) void {
     _ = linux.close(fd);
-}
-
-fn _read(fd: linux.fd_t, buf: []u8) errors.ReadError![]u8 {
-    const rc = linux.read(fd, buf.ptr, buf.len);
-    return switch (linux.errno(rc)) {
-        // A zero-length read on a character device means the device is gone;
-        // an idle device does not return at all.
-        .SUCCESS => if (rc == 0) error.DeviceDisconnected else buf[0..rc],
-        else => |e| mapErrno("read", e),
-    };
-}
-
-fn _write(fd: linux.fd_t, data: []const u8) errors.WriteError!usize {
-    const rc = linux.write(fd, data.ptr, data.len);
-    return switch (linux.errno(rc)) {
-        .SUCCESS => rc,
-        else => |e| mapErrno("write", e),
-    };
 }
 
 /// Walks `/sys/class/hidraw`.

@@ -94,4 +94,5 @@ test {
     _ = @import("backend.zig");
     _ = @import("backend/contract.zig");
     _ = errors;
+    _ = @import("io_op.zig");
 }

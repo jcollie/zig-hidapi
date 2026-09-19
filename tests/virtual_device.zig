@@ -213,6 +213,60 @@ test "reports round trip through a virtual device" {
     try std.testing.expectEqualSlices(u8, &sent, device.lastOutput());
 }
 
+test "readTimeout gives up on a silent device and returns what a talkative one sends" {
+    const io = std.testing.io;
+
+    var device = uhid.VirtualDevice.create(spec()) catch |err| switch (err) {
+        error.UhidNotAvailable, error.UhidNoAccess => return error.SkipZigTest,
+        else => return err,
+    };
+    defer device.destroy();
+
+    var info: hidapi.DeviceInfo = undefined;
+    try waitForDevice(io, &info);
+
+    var handle: hidapi.Device = undefined;
+    try handle.open(io, info.id, .{});
+    defer handle.close(io);
+
+    var buf: [64]u8 = undefined;
+
+    // Nothing has been sent, so this has to come back empty rather than wait
+    // forever -- which is exactly what `read` would do here, and the reason
+    // `readTimeout` exists.
+    try std.testing.expectEqual(
+        @as(?[]u8, null),
+        try handle.readTimeout(io, &buf, .{
+            .duration = .{ .raw = .fromMilliseconds(50), .clock = .awake },
+        }),
+    );
+
+    // A zero duration is the non-blocking poll, and there is still nothing.
+    try std.testing.expectEqual(
+        @as(?[]u8, null),
+        try handle.readTimeout(io, &buf, .{
+            .duration = .{ .raw = .zero, .clock = .awake },
+        }),
+    );
+
+    // Now there is. hidraw buffers the report, so even the zero-duration poll
+    // finds it, and a timeout that expired a moment ago must not swallow it.
+    try device.sendInput(&input_payload);
+    const got = try handle.readTimeout(io, &buf, .{
+        .duration = .{ .raw = .fromSeconds(5), .clock = .awake },
+    }) orelse return error.TimedOutWithAReportWaiting;
+    try std.testing.expectEqualSlices(u8, &input_payload, got);
+
+    // And the queue is empty again afterwards, so the report was consumed
+    // once rather than left pending by the cancelled batch.
+    try std.testing.expectEqual(
+        @as(?[]u8, null),
+        try handle.readTimeout(io, &buf, .{
+            .duration = .{ .raw = .fromMilliseconds(50), .clock = .awake },
+        }),
+    );
+}
+
 test {
     std.testing.refAllDecls(@This());
     _ = uhid;

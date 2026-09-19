@@ -151,6 +151,25 @@ std.debug.print("read {d} bytes\n", .{report.len});
 `read` returns `error.DeviceDisconnected` when the device goes away, which is
 the ordinary end of a read loop rather than a failure to report.
 
+`read` waits indefinitely, so anything that has to stay responsive wants
+`readTimeout` instead, which returns `null` when nothing arrived in time:
+
+```zig
+const waited = try device.readTimeout(io, &in, .{
+    .duration = .{ .raw = .fromMilliseconds(250), .clock = .awake },
+});
+
+// A zero duration is a non-blocking poll: take whatever is already waiting.
+const polled = try device.readTimeout(io, &in, .{
+    .duration = .{ .raw = .zero, .clock = .awake },
+});
+```
+
+There is deliberately no non-blocking *mode* to set, the way the C hidapi has
+one — a mode is a second way of saying what the timeout already says. Note
+that `null` and a zero-length report are different answers, since a device may
+legitimately send a report with no data.
+
 ### Feature reports
 
 ```zig
@@ -216,7 +235,8 @@ An open device. Caller-owned storage, used through a pointer.
 | --- | --- |
 | `open(io, id, options)` | Open the device `id` names |
 | `close(io)` | Close it |
-| `read(io, buf)` | Read an input report from the interrupt IN endpoint |
+| `read(io, buf)` | Read an input report, waiting for one |
+| `readTimeout(io, buf, timeout)` | …giving up after `timeout`; `null` if none came |
 | `write(io, report)` | Write an output report |
 | `getInputReport(io, buf)` | Request an input report over the control endpoint |
 | `getFeatureReport(io, buf)` | Request a feature report over the control endpoint |

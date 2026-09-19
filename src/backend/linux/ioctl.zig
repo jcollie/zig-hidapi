@@ -2,8 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 //! The parts of the kernel's `hidraw` interface this library needs: the ioctl
-//! request numbers, the structures they exchange, and a thin wrapper around
-//! the `ioctl` syscall itself.
+//! request numbers and the structures they exchange.
+//!
+//! There is no syscall wrapper here. `std.Io.Operation` has a
+//! `device_io_control` tag which is `ioctl` on POSIX and
+//! `NtDeviceIoControlFile` on Windows, so the request goes through the
+//! caller's `Io` -- cancelable, and the same call the Windows backend will
+//! make -- and this file is left with the numbers.
 //!
 //! The declarations mirror `uapi/linux/hidraw.h`, and the comments on the
 //! request numbers are the kernel's own text from
@@ -287,38 +292,6 @@ pub fn HIDIOCGOUTPUT(len: Size) u32 {
         .size = len,
     };
     return @bitCast(request);
-}
-
-/// The outcome of an ioctl: what the syscall returned, or why it refused.
-pub const IOCtlResult = union(enum) {
-    /// The syscall's return value. Most of these requests return zero, but
-    /// the ones that copy a string out return the number of bytes copied,
-    /// including the terminator.
-    success: usize,
-    /// The `errno` the syscall set.
-    failure: linux.E,
-};
-
-/// Issue `request` on `fd` with `arg`, dispatched through `io`.
-///
-/// A failing syscall is reported as `.failure` rather than an error, leaving
-/// each caller to decide which `errno` values matter to it. The error union
-/// only covers a failure to dispatch the call through `io` in the first place.
-pub const IOCtlError = std.Io.Cancelable || std.Io.ConcurrentError;
-
-pub fn ioctl(io: std.Io, fd: linux.fd_t, request: u32, arg: usize) IOCtlError!IOCtlResult {
-    var future = try io.concurrent(_ioctl, .{ fd, request, arg });
-    defer _ = future.cancel(io);
-    const rc = future.await(io);
-    switch (linux.errno(rc)) {
-        .SUCCESS => return .{ .success = rc },
-        else => |e| return .{ .failure = e },
-    }
-}
-
-/// The blocking half of `ioctl`, the part that `io` runs.
-fn _ioctl(fd: linux.fd_t, request: u32, arg: usize) usize {
-    return linux.ioctl(fd, request, arg);
 }
 
 test {
