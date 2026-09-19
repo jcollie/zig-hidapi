@@ -67,8 +67,12 @@ jobs:
           nix develop -c zig version
           nix develop -c zig build test -Doptimize=${{ matrix.optimize }} --summary all
 
+      # `zig-pkg` is where Zig materialises a fetched dependency, so once
+      # anything has built for Windows it holds 64 MB of generated Win32
+      # bindings. `zig fmt` walks it happily and reports every one of them,
+      # and unlike `reuse` it does not honour `.gitignore`.
       - name: Check Zig formatting compliance
-        run: nix develop -c zig fmt --check .
+        run: nix develop -c zig fmt --check --exclude zig-pkg .
 
   check:
     # Compiles the library for every supported target without linking it, so

@@ -444,7 +444,12 @@ checking:
 ```sh
 reuse lint
 typos
+zig fmt --check --exclude zig-pkg .
 ```
+
+`zig-pkg` is where Zig materialises a fetched dependency, so after anything
+has built for Windows it holds the Win32 bindings. It is in `.gitignore`, but
+`zig fmt` does not honour that the way `reuse` does, hence the `--exclude`.
 
 ## License
 
