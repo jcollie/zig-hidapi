@@ -24,8 +24,6 @@
 
 const std = @import("std");
 
-const BusType = @import("../../bus_type.zig").BusType;
-
 /// Where the class directory lives. Taken as a constant rather than found, so
 /// that a test can point the reader at a fixture tree instead.
 pub const class_path = "/sys/class/hidraw";
@@ -94,22 +92,6 @@ fn parseHidId(value: []const u8, out: *Uevent) void {
     out.bus = std.math.cast(u16, b) orelse return;
     out.vendor = std.math.cast(u16, v) orelse return;
     out.product = std.math.cast(u16, p) orelse return;
-}
-
-/// The bus a `BUS_*` value names.
-///
-/// Non-exhaustive on purpose: the kernel gains bus types, and one it has and
-/// this list does not is `other` rather than a reason to hide the device.
-pub fn busType(raw: u16) BusType {
-    return switch (raw) {
-        0x00 => .unknown,
-        0x03 => .usb,
-        0x05 => .bluetooth,
-        0x06 => .virtual,
-        0x18 => .i2c,
-        0x1C => .spi,
-        else => .other,
-    };
 }
 
 /// Read a sysfs attribute and strip the newline the kernel appends.
@@ -196,7 +178,6 @@ test "a USB mouse's uevent" {
     // says the device reports no serial number.
     try std.testing.expectEqualStrings("", u.uniq);
     try std.testing.expect(isUsb(u));
-    try std.testing.expectEqual(BusType.usb, busType(u.bus));
 }
 
 test "a Bluetooth device seeds HID_UNIQ from the hardware address" {
@@ -208,7 +189,7 @@ test "a Bluetooth device seeds HID_UNIQ from the hardware address" {
         \\
     ;
     const u = parseUevent(text);
-    try std.testing.expectEqual(BusType.bluetooth, busType(u.bus));
+    try std.testing.expectEqual(@as(u16, 0x0005), u.bus);
     try std.testing.expectEqualStrings("a0:ab:51:33:cd:ef", u.uniq);
     // Not USB, so the manufacturer walk must not be attempted: `..` there is
     // a Bluetooth device, and reading `manufacturer` off it would be a
@@ -230,11 +211,6 @@ test "a value containing an equals sign survives" {
     // separator rather than the first is a classic way to lose one.
     const u = parseUevent("HID_NAME=Foo = Bar\n");
     try std.testing.expectEqualStrings("Foo = Bar", u.name);
-}
-
-test "unknown bus values map to other rather than disappearing" {
-    try std.testing.expectEqual(BusType.other, busType(0x11)); // BUS_I8042
-    try std.testing.expectEqual(BusType.unknown, busType(0));
 }
 
 test {

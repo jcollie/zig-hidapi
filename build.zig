@@ -153,6 +153,13 @@ fn configure(module: *std.Build.Module) void {
         // ships no raw-syscall layer for FreeBSD or Darwin, and Windows has
         // none to ship.
         .linux => {},
+
+        // Zig 0.16 ships no raw-syscall layer for FreeBSD -- `std/os/` has
+        // linux, windows, plan9, uefi and wasi and nothing else -- so every
+        // syscall goes through `std.c` and this target has to link libc.
+        // Nothing in the backend calls libc directly; `std.Io` does.
+        .freebsd => module.link_libc = true,
+
         else => {},
     }
 }
@@ -166,6 +173,8 @@ fn configure(module: *std.Build.Module) void {
 const checked_targets = [_]std.Target.Query{
     .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .gnu },
     .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .musl },
+    .{ .cpu_arch = .x86_64, .os_tag = .freebsd },
+    .{ .cpu_arch = .aarch64, .os_tag = .freebsd },
 };
 
 /// A step that compiles the library for every supported target without

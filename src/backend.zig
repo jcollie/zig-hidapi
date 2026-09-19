@@ -18,11 +18,13 @@ const contract = @import("backend/contract.zig");
 /// as backends are added.
 pub const supported = [_]std.Target.Os.Tag{
     .linux,
+    .freebsd,
 };
 
 /// The backend for this target.
 pub const impl = switch (builtin.os.tag) {
     .linux => @import("backend/linux.zig"),
+    .freebsd => @import("backend/freebsd.zig"),
     else => @compileError(unsupported),
 };
 
@@ -45,4 +47,19 @@ comptime {
 
 test {
     std.testing.refAllDecls(@This());
+
+    // Also compile the backends for *other* systems, where they compile on
+    // this host at all, so that their tests run here.
+    //
+    // What that buys is the request number tables. Those are pure arithmetic
+    // checked against the kernel headers, and getting one wrong is answered
+    // with `ENOTTY` -- an error that says nothing whatever about the cause --
+    // so they are worth checking on whatever machine runs the suite rather
+    // than only on the system they are for. Nobody has a FreeBSD box to hand
+    // every time they touch this.
+    //
+    // Only the ones that can. `backend/linux.zig` names `std.os.linux.IOCTL`
+    // and so compiles on Linux alone; the FreeBSD backend touches nothing
+    // platform-specific, because everything it does goes through `std.Io`.
+    if (builtin.os.tag == .linux) _ = @import("backend/freebsd.zig");
 }

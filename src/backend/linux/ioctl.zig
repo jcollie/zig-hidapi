@@ -29,13 +29,18 @@
 const std = @import("std");
 const linux = std.os.linux;
 
-/// The type of the length field of a request number, and so the largest
-/// buffer any of the requests below can name: 14 bits on most architectures,
-/// 13 bits on the ones that spend an extra bit on the direction.
+/// The type of the length field of a request number: 14 bits on most
+/// architectures, 13 bits on the ones that spend an extra bit on the
+/// direction. Following the target rather than hardcoding a width is the
+/// whole reason this is taken from `linux.IOCTL` rather than written out.
+const Size = @FieldType(linux.IOCTL.Request, "size");
+
+/// The largest buffer any of the requests below can name.
 ///
-/// Public so that a caller holding a `usize` length can narrow it, which
-/// `Device` does with `std.math.cast`.
-pub const Size = @FieldType(linux.IOCTL.Request, "size");
+/// The shared `hidraw` backend carries this in its request table, because
+/// FreeBSD's is 13 bits where most of Linux's is 14, and a caller's buffer
+/// has to be clamped to whichever applies.
+pub const max_len: u16 = std.math.maxInt(Size);
 
 /// The bus a device is attached to, as the `BUS_*` values of
 /// `uapi/linux/input.h`.
@@ -155,12 +160,12 @@ const write = 1;
 
 /// This ioctl returns a string containing the vendor and product strings of the
 /// device. The returned string is Unicode, UTF-8 encoded.
-pub fn HIDIOCGRAWNAME(len: Size) u32 {
+pub fn HIDIOCGRAWNAME(len: u16) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x04,
         .dir = read,
-        .size = len,
+        .size = @intCast(@min(len, max_len)),
     };
     return @bitCast(request);
 }
@@ -169,12 +174,12 @@ pub fn HIDIOCGRAWNAME(len: Size) u32 {
 /// device. For USB devices, the string contains the physical path to the device
 /// (the USB controller, hubs, ports, etc). For Bluetooth devices, the string
 /// contains the hardware (MAC) address of the device.
-pub fn HIDIOCGRAWPHYS(len: Size) u32 {
+pub fn HIDIOCGRAWPHYS(len: u16) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x05,
         .dir = read,
-        .size = len,
+        .size = @intCast(@min(len, max_len)),
     };
     return @bitCast(request);
 }
@@ -185,12 +190,12 @@ pub fn HIDIOCGRAWPHYS(len: Size) u32 {
 /// which do not use numbered reports, set the first byte to 0. The report data
 /// begins in the second byte. Make sure to set len accordingly, to one more
 /// than the length of the report (to account for the report number).
-pub fn HIDIOCSFEATURE(len: Size) u32 {
+pub fn HIDIOCSFEATURE(len: u16) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x06,
         .dir = read | write,
-        .size = len,
+        .size = @intCast(@min(len, max_len)),
     };
     return @bitCast(request);
 }
@@ -202,12 +207,12 @@ pub fn HIDIOCSFEATURE(len: Size) u32 {
 /// the report number in the first byte, followed by the report data read from
 /// the device. For devices which do not use numbered reports, the report data
 /// will begin at the first byte of the returned buffer.
-pub fn HIDIOCGFEATURE(len: Size) u32 {
+pub fn HIDIOCGFEATURE(len: u16) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x07,
         .dir = read | write,
-        .size = len,
+        .size = @intCast(@min(len, max_len)),
     };
     return @bitCast(request);
 }
@@ -219,12 +224,12 @@ pub fn HIDIOCGFEATURE(len: Size) u32 {
 ///
 /// Unlike the comments above, this one is not the kernel's own text: the
 /// hidraw documentation does not cover this request.
-pub fn HIDIOCGRAWUNIQ(len: Size) u32 {
+pub fn HIDIOCGRAWUNIQ(len: u16) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x08,
         .dir = read,
-        .size = len,
+        .size = @intCast(@min(len, max_len)),
     };
     return @bitCast(request);
 }
@@ -234,12 +239,12 @@ pub fn HIDIOCGRAWUNIQ(len: Size) u32 {
 /// meaningless and has no effect, but some devices may choose to use this to
 /// set or reset an initial state of a report. The format of the buffer issued
 /// with this report is identical to that of HIDIOCSFEATURE.
-pub fn HIDIOCSINPUT(len: Size) u32 {
+pub fn HIDIOCSINPUT(len: u16) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x09,
         .dir = read | write,
-        .size = len,
+        .size = @intCast(@min(len, max_len)),
     };
     return @bitCast(request);
 }
@@ -251,12 +256,12 @@ pub fn HIDIOCSINPUT(len: Size) u32 {
 /// states of an input report of a device, before an application listens for
 /// normal reports via the regular device read() interface. The format of the
 /// buffer issued with this report is identical to that of HIDIOCGFEATURE.
-pub fn HIDIOCGINPUT(len: Size) u32 {
+pub fn HIDIOCGINPUT(len: u16) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x0A,
         .dir = read | write,
-        .size = len,
+        .size = @intCast(@min(len, max_len)),
     };
     return @bitCast(request);
 }
@@ -268,12 +273,12 @@ pub fn HIDIOCGINPUT(len: Size) u32 {
 /// before an application sends updates via the regular device write()
 /// interface. The format of the buffer issued with this report is identical to
 /// that of HIDIOCSFEATURE.
-pub fn HIDIOCSOUTPUT(len: Size) u32 {
+pub fn HIDIOCSOUTPUT(len: u16) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x0B,
         .dir = read | write,
-        .size = len,
+        .size = @intCast(@min(len, max_len)),
     };
     return @bitCast(request);
 }
@@ -284,12 +289,12 @@ pub fn HIDIOCSOUTPUT(len: Size) u32 {
 /// either via a HIDIOCSOUTPUT request, or the regular device write() interface.
 /// The format of the buffer issued with this report is identical to that of
 /// HIDIOCGFEATURE.
-pub fn HIDIOCGOUTPUT(len: Size) u32 {
+pub fn HIDIOCGOUTPUT(len: u16) u32 {
     const request: linux.IOCTL.Request = .{
         .io_type = 'H',
         .nr = 0x0C,
         .dir = read | write,
-        .size = len,
+        .size = @intCast(@min(len, max_len)),
     };
     return @bitCast(request);
 }

@@ -8,9 +8,10 @@ SPDX-License-Identifier: MIT
 A Zig library for talking to USB and Bluetooth HID devices, without linking
 the C [hidapi](https://github.com/libusb/hidapi) library.
 
-On Linux it issues the `HIDIOC*` ioctls directly against `/dev/hidraw*` and
-reads `/sys/class/hidraw` for everything that can be learned without opening a
-device, so a Linux build links no C at all. It is built on Zig 0.16's `std.Io`
+On Linux and FreeBSD it issues the `HIDIOC*` ioctls directly against
+`/dev/hidraw*`, and on Linux it reads `/sys/class/hidraw` for everything that
+can be learned without opening a device, so a Linux build links no C at all.
+It is built on Zig 0.16's `std.Io`
 interface, so every blocking operation is dispatched through the caller's I/O
 implementation rather than blocking a thread outright, and it allocates
 nothing: every buffer it needs is one the caller supplies.
@@ -20,7 +21,7 @@ nothing: every buffer it needs is one the caller supplies.
 | System | Interface | Status |
 | --- | --- | --- |
 | Linux | `hidraw` and `/sys/class/hidraw` | supported |
-| FreeBSD | `hidraw(4)` | planned |
+| FreeBSD | `hidraw(4)` | supported |
 | Windows | HIDCLASS through `NtDeviceIoControlFile` | planned |
 | macOS | IOKit `IOHIDManager` | planned |
 
@@ -31,6 +32,18 @@ are, rather than a failure somewhere deeper.
 
 - Zig 0.16
 - Linux with the `hidraw` driver (`CONFIG_HIDRAW`), i.e. `/dev/hidraw*` present
+- or FreeBSD 13 or later with `hidraw(4)` attached — the default from 14.2,
+  and before that `hw.usb.usbhid.enable=1` in `/boot/loader.conf` together with
+  `usbhid` in `kld_list` in `/etc/rc.conf`
+
+FreeBSD's `hidraw(4)` implements Linux's request set deliberately, so an open
+device behaves identically on the two. Two things differ and are worth
+knowing. The request *numbers* are not the same — BSD encodes them differently
+and FreeBSD numbers its from a different group — which the library handles and
+you never see. Enumeration is the visible one: FreeBSD has no sysfs, so it has
+to open each node to learn anything about it, and an unprivileged process
+without a `devfs.rules` entry therefore sees **nothing** where the same process
+on Linux would see everything and merely be unable to open it.
 
 ## Installation
 
@@ -286,6 +299,17 @@ KERNEL=="hidraw*", ATTRS{idVendor}=="1234", ATTRS{idProduct}=="5678", MODE="0660
 
 Then `udevadm control --reload-rules && udevadm trigger`, and make sure your
 user is in the group you named.
+
+On FreeBSD the equivalent is a `devfs.rules` entry, in `/etc/devfs.rules`:
+
+```
+[localrules=10]
+add path 'hidraw*' mode 0660 group operator
+```
+
+with `devfs_system_ruleset="localrules"` in `/etc/rc.conf`, and your user in
+the group. Note that on FreeBSD this affects enumeration too, not just
+opening: without it the device list comes back empty.
 
 ## Where this lives
 
