@@ -19,12 +19,14 @@ const contract = @import("backend/contract.zig");
 pub const supported = [_]std.Target.Os.Tag{
     .linux,
     .freebsd,
+    .windows,
 };
 
 /// The backend for this target.
 pub const impl = switch (builtin.os.tag) {
     .linux => @import("backend/linux.zig"),
     .freebsd => @import("backend/freebsd.zig"),
+    .windows => @import("backend/windows.zig"),
     else => @compileError(unsupported),
 };
 
@@ -62,4 +64,13 @@ test {
     // and so compiles on Linux alone; the FreeBSD backend touches nothing
     // platform-specific, because everything it does goes through `std.Io`.
     if (builtin.os.tag == .linux) _ = @import("backend/freebsd.zig");
+
+    // The Windows backend's own file cannot be compiled here -- it imports
+    // the `zigwin32` package, which is a lazy dependency a Linux build has no
+    // reason to fetch -- but the two parts of it that are pure logic can.
+    // Those are the parts worth checking anyway: the control codes, which are
+    // answered with STATUS_INVALID_DEVICE_REQUEST when wrong, and the path
+    // parsing, which is what decides whether a device is skipped.
+    _ = @import("backend/windows/ioctl.zig");
+    _ = @import("backend/windows/path.zig");
 }

@@ -36,7 +36,15 @@ stdenv.mkDerivation (finalAttrs: {
 
   # `test-exe` installs the test binaries; the default step would install
   # nothing, since the library produces no artifact.
-  zigBuildFlags = [ "test-exe" ];
+  #
+  # `-Dcheck-windows=false` keeps the build script from constructing the
+  # Windows half of `zig build check`, which would ask for the generated Win32
+  # bindings and so try to fetch them. There is no network here, and nothing
+  # in a Linux virtual machine test wants a Windows object anyway.
+  zigBuildFlags = [
+    "test-exe"
+    "-Dcheck-windows=false"
+  ];
 
   # The tests are the product, so running them here would be running them
   # twice -- and the sandbox is not root and has no `/dev/uhid`, so the half

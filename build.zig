@@ -12,7 +12,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    configure(module);
+    configure(b, module);
 
     const unit_tests = b.addTest(
         .{
@@ -116,7 +116,15 @@ pub fn build(b: *std.Build) void {
     const docs_serve_step = b.step("docs-serve", "Serve the API documentation over HTTP");
     docs_serve_step.dependOn(&run_docs_server.step);
 
-    addCheckStep(b, optimize, docs_server);
+    // Only when this is the root package. A dependent's build runs this
+    // script too, and constructing the cross-target check reaches for every
+    // backend's dependencies -- which for Windows means fetching 7 MB of
+    // generated Win32 bindings. A Linux program that merely uses this library
+    // should not pay that for a step it will never run.
+    //
+    // `pkg_hash` is empty for the root package and is the hash of the package
+    // otherwise, which is exactly the distinction wanted.
+    if (b.pkg_hash.len == 0) addCheckStep(b, optimize, docs_server);
 
     // The server has tests of its own; without this they would never run.
     // Only in a Debug build, though: its module is pinned to Debug whatever
@@ -146,7 +154,7 @@ pub fn build(b: *std.Build) void {
 /// message, so a dependent that adds the module without going through this
 /// `build.zig` fails the same way and reads the same explanation, rather than
 /// getting a worse one from somewhere inside `Device`.
-fn configure(module: *std.Build.Module) void {
+fn configure(b: *std.Build, module: *std.Build.Module) void {
     switch (module.resolved_target.?.result.os.tag) {
         // Every syscall goes through `std.os.linux`, so a Linux build links
         // no C at all. The other backends will not have that luxury: Zig 0.16
@@ -160,11 +168,29 @@ fn configure(module: *std.Build.Module) void {
         // Nothing in the backend calls libc directly; `std.Io` does.
         .freebsd => module.link_libc = true,
 
+        // `NtDeviceIoControlFile` comes from std, so the only thing needed
+        // here is the generated Win32 bindings. They are a lazy dependency,
+        // which is what keeps a Linux build from fetching them.
+        //
+        // `pic` is not optional. An `extern "hid"` reference in a build that
+        // does not link -- which is exactly what the `check` step below does
+        // -- is refused with "dependency on dynamic library 'hid' requires
+        // enabling Position Independent Code", and naming the library instead
+        // does not work there, because the import library is only generated
+        // for a real link step.
+        .windows => {
+            module.pic = true;
+            if (b.lazyDependency("win32", .{})) |dep| {
+                module.addImport("win32", dep.module("win32"));
+            }
+        },
+
         else => {},
     }
 }
 
-/// The targets `zig build check` compiles for.
+/// The targets `zig build check` compiles for, given whether the Windows
+/// bindings may be fetched.
 ///
 /// Two architectures per system, not one. The ioctl request number's length
 /// field is 14 bits on most architectures and 13 on the ones that spend an
@@ -175,6 +201,11 @@ const checked_targets = [_]std.Target.Query{
     .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .musl },
     .{ .cpu_arch = .x86_64, .os_tag = .freebsd },
     .{ .cpu_arch = .aarch64, .os_tag = .freebsd },
+    // `-gnu` rather than `-msvc`: the MSVC ABI wants the Windows SDK's import
+    // libraries, which a Linux machine does not have, while the GNU ABI uses
+    // the mingw `.def` files Zig ships.
+    .{ .cpu_arch = .x86_64, .os_tag = .windows, .abi = .gnu },
+    .{ .cpu_arch = .aarch64, .os_tag = .windows, .abi = .gnu },
 };
 
 /// A step that compiles the library for every supported target without
@@ -198,14 +229,26 @@ fn addCheckStep(
 ) void {
     const check_step = b.step("check", "Compile for every supported target without linking");
 
+    // Building for Windows means reaching for the generated Win32 bindings,
+    // and asking for them is what makes Zig fetch them -- about 7 MB
+    // compressed. That is the right trade for a developer or for CI, and the
+    // wrong one for a build that is only after the Linux test binaries and
+    // has no network at all, which is exactly what the Nix build is.
+    const check_windows = b.option(
+        bool,
+        "check-windows",
+        "Include the Windows targets in `zig build check` (fetches the Win32 bindings)",
+    ) orelse true;
+
     for (checked_targets) |query| {
+        if (query.os_tag == .windows and !check_windows) continue;
         const target = b.resolveTargetQuery(query);
         const module = b.createModule(.{
             .root_source_file = b.path("src/hidapi.zig"),
             .target = target,
             .optimize = optimize,
         });
-        configure(module);
+        configure(b, module);
 
         check_step.dependOn(&b.addObject(.{
             .name = b.fmt("hidapi-{t}-{t}", .{ query.cpu_arch.?, query.os_tag.? }),

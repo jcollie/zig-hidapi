@@ -8,11 +8,18 @@
     nixpkgs = {
       url = "https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.zst";
     };
+    # Mine, and not the `zon2nix` in nixpkgs, which is a different program
+    # taking different options.
+    zon2nix = {
+      url = "github:jcollie/zon2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
     {
       nixpkgs,
+      zon2nix,
       ...
     }:
     let
@@ -67,6 +74,18 @@
               pkgs.radicle-node
               pkgs.reuse
               pkgs.typos
+              # Wrapped so that the Zig it shells out to for `zig env` is the
+              # one this project builds with, rather than whatever happens to
+              # be on the caller's PATH.
+              (pkgs.symlinkJoin {
+                name = "zon2nix";
+                paths = [ zon2nix.packages.${pkgs.stdenv.hostPlatform.system}.zon2nix ];
+                nativeBuildInputs = [ pkgs.makeWrapper ];
+                postBuild = ''
+                  wrapProgram $out/bin/zon2nix \
+                    --prefix PATH : ${lib.makeBinPath [ pkgs.zig_0_16 ]}
+                '';
+              })
               pkgs.zig_0_16
             ];
           };

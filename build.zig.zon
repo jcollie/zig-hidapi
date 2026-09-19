@@ -6,7 +6,21 @@
     .version = "0.0.3",
     .minimum_zig_version = "0.16.0",
     .fingerprint = 0x274758e133e8ea3e,
-    .dependencies = .{},
+    .dependencies = .{
+        // Generated Zig bindings for the Win32 API, used only by the Windows
+        // backend. A tarball rather than `git+https`: the repository is
+        // around 99 MB of history where a tarball of one commit is 7 MB.
+        //
+        // Lazy, so that a program which merely depends on this library on
+        // Linux never fetches it. Building *this* repository does, because
+        // `zig build check` compiles the Windows backend; pass
+        // `-Dcheck-windows=false` to a build that must not reach the network.
+        .win32 = .{
+            .url = "https://github.com/marlersoft/zigwin32/archive/9f15c276b4e9d05afd34a10d8662a7dfc34647ea.tar.gz",
+            .hash = "win32-42.0.39-preview-mX5pFS564gPTezZn4v3TMxRnfJUrZNx1B_F2p2HKXOeG",
+            .lazy = true,
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",

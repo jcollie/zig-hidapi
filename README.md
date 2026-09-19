@@ -22,11 +22,32 @@ nothing: every buffer it needs is one the caller supplies.
 | --- | --- | --- |
 | Linux | `hidraw` and `/sys/class/hidraw` | supported |
 | FreeBSD | `hidraw(4)` | supported |
-| Windows | HIDCLASS through `NtDeviceIoControlFile` | planned |
+| Windows | HIDCLASS through `NtDeviceIoControlFile` | supported |
 | macOS | IOKit `IOHIDManager` | planned |
 
 Building for a system with no backend is a compile error naming the ones there
 are, rather than a failure somewhere deeper.
+
+On Windows every request goes through `NtDeviceIoControlFile` with the
+`IOCTL_HID_*` codes, rather than through the `HidD_*` wrappers in `hid.dll`,
+so reads are cancelable and can take a timeout. The Win32 declarations come
+from [zigwin32](https://github.com/marlersoft/zigwin32), which is the only
+dependency this library has and is fetched only when building for Windows.
+
+Two Windows limitations are worth knowing before you rely on them:
+
+- **`getReportDescriptor` returns `error.Unsupported`.** The HID class driver
+  keeps only its own parsed form of the descriptor and does not serve the
+  original bytes to user mode at all. A descriptor can be *reconstructed* from
+  the parsed form — the C hidapi spends about a thousand lines doing it — but
+  the result is equivalent rather than identical, and this library would
+  rather say it cannot than hand back bytes the device never sent.
+  `Device.getPreparsedData` offers the parsed form to a caller who knows what
+  to do with it.
+- **Keyboards and pointing devices cannot be read.** The system holds them
+  exclusively, so they open for metadata only: they enumerate and describe
+  themselves perfectly well, and `read` and `write` report
+  `error.AccessDenied`.
 
 ## Requirements
 
