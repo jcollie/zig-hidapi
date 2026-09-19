@@ -28,6 +28,31 @@
       forAllSystems = lib.genAttrs linuxSystems;
     in
     {
+      packages = forAllSystems (
+        system:
+        let
+          pkgs = makePackages system;
+        in
+        rec {
+          tests = pkgs.callPackage ./package.nix { };
+          default = tests;
+        }
+      );
+
+      # Linux only, and not because of the library -- `pkgs.testers.runNixOSTest`
+      # cannot be evaluated for Darwin at all, and `nix flake check` would try.
+      checks = forAllSystems (
+        system:
+        let
+          pkgs = makePackages system;
+          tests = pkgs.callPackage ./package.nix { };
+        in
+        {
+          inherit tests;
+          uhid = pkgs.testers.runNixOSTest (import ./tests/nixos/uhid.nix { inherit tests; });
+        }
+      );
+
       devShells = forAllSystems (
         system:
         let

@@ -352,6 +352,17 @@ read-only-operations test opens as many of them as it is allowed to, so both
 depend on what hardware is attached and on the permissions described above.
 The second reports `SkipZigTest` when it could open none.
 
+The tests in `tests/` do not depend on hardware at all: they invent a HID
+device through Linux's `uhid`, with a report descriptor and strings of their
+own choosing, and then enumerate it, open it and exchange reports with it
+through this library. `/dev/uhid` is root-only, so they report `SkipZigTest`
+on a workstation and do their work in a NixOS virtual machine, which is also
+what CI runs:
+
+```sh
+nix flake check
+```
+
 This repository follows the [REUSE](https://reuse.software/) specification for
 licensing metadata and uses [typos](https://github.com/crate-ci/typos) for spell
 checking:

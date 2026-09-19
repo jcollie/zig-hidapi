@@ -70,6 +70,26 @@ jobs:
       - name: Check Zig formatting compliance
         run: nix develop -c zig fmt --check .
 
+  vm:
+    # The only job that proves anything about behaviour rather than about
+    # compilation. A runner has no HID hardware, so `zig build test` above
+    # finds an empty device list and skips everything that wants a device;
+    # here the suite invents a device through `/dev/uhid` and then talks to it
+    # through the library, so what it asserts is exact.
+    #
+    # `/dev/uhid` is root-only, which is the whole reason this needs a virtual
+    # machine rather than another step in `test`. A NixOS VM test needs a
+    # runner that can boot a guest, which is what the ephemeral DigitalOcean
+    # tiers are and what the always-on runner deliberately is not.
+    needs: reuse
+    runs-on: nixos-do-s
+    steps:
+      - name: Check out
+        uses: https://code.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run the NixOS virtual machine tests
+        run: nix flake check --print-build-logs
+
   docs:
     # Publishes the generated API reference to
     # https://jeff.jcollie.page/zig-hidapi/ .
@@ -78,7 +98,7 @@ jobs:
     # to jobs within one workflow; a separate file could not wait on them. The
     # tests have to be green first, so a build that no longer compiles never
     # replaces the published documentation.
-    needs: test
+    needs: [test, vm]
     # ...and only from the default branch, or any pushed branch would publish
     # over the live site.
     if: ${{ forge.ref == 'refs/heads/main' }}
