@@ -301,17 +301,28 @@ test "read-only operations against attached devices" {
         try std.testing.expectEqual(listed.product_id, opened.product_id);
         try std.testing.expectEqual(listed.native_bus, opened.native_bus);
 
-        const len = try dev.getReportDescriptorLen(io);
-        try std.testing.expect(len <= max_report_descriptor_len);
-        const bytes = try dev.getReportDescriptor(io, descriptor[0..len]);
-        try std.testing.expectEqual(@as(usize, len), bytes.len);
+        // Windows has no report descriptor to give -- the class driver keeps
+        // only its own parsed form -- so `Unsupported` is a correct answer
+        // here rather than a failure, and the two calls have to agree about
+        // which answer they are giving.
+        if (dev.getReportDescriptorLen(io)) |len| {
+            try std.testing.expect(len <= max_report_descriptor_len);
+            const bytes = try dev.getReportDescriptor(io, descriptor[0..len]);
+            try std.testing.expectEqual(@as(usize, len), bytes.len);
 
-        // A buffer one byte short of the descriptor has to be reported rather
-        // than quietly filled.
-        if (len > 0) try std.testing.expectError(
-            error.BufferTooSmall,
-            dev.getReportDescriptor(io, descriptor[0 .. len - 1]),
-        );
+            // A buffer one byte short of the descriptor has to be reported
+            // rather than quietly filled.
+            if (len > 0) try std.testing.expectError(
+                error.BufferTooSmall,
+                dev.getReportDescriptor(io, descriptor[0 .. len - 1]),
+            );
+        } else |err| switch (err) {
+            error.Unsupported => try std.testing.expectError(
+                error.Unsupported,
+                dev.getReportDescriptor(io, &descriptor),
+            ),
+            else => return err,
+        }
 
         checked += 1;
     }

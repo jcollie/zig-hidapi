@@ -165,7 +165,11 @@ pub const Device = struct {
     /// stable and does not leak an address.
     mode: cf.CFStringRef,
     source: cf.CFRunLoopSourceRef,
-    run_loop: std.atomic.Value(?cf.CFRunLoopRef),
+    /// `CFRunLoopRef` is already `?*anyopaque`, so this is *not* wrapped in
+    /// another optional: `std.atomic.Value` is an `extern struct`, and a
+    /// double optional has no guaranteed in-memory representation to put in
+    /// one. `null` means the reader task has not published it yet.
+    run_loop: std.atomic.Value(cf.CFRunLoopRef),
 
     shutdown: std.atomic.Value(bool),
     disconnected: std.atomic.Value(bool),
@@ -492,7 +496,11 @@ pub const Device = struct {
         io: std.Io,
         kind: iokit.IOHIDReportType,
         data: []const u8,
-    ) errors.ReportError!void {
+    ) errors.WriteError!void {
+        // Every report carries a report ID byte, so an empty one is not a
+        // report at all. `WriteError` rather than `ReportError` because that
+        // is the narrower of the two and `sendFeatureReport` widens to the
+        // other on its way out.
         if (data.len == 0) return error.ReportTooLarge;
         const report_id = data[0];
         const payload = if (report_id == 0) data[1..] else data;
@@ -579,7 +587,7 @@ fn setReportBlocking(
     kind: iokit.IOHIDReportType,
     report_id: u8,
     payload: []const u8,
-) errors.ReportError!void {
+) errors.WriteError!void {
     const rc = iokit.IOHIDDeviceSetReport(
         handle,
         kind,

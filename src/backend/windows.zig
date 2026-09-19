@@ -418,32 +418,48 @@ pub const Device = struct {
         out.usage_page = self.usage_page;
         out.usage = self.usage;
 
-        out.manufacturer = try self.string(io, "MANUFACTURER", ioctl.GET_MANUFACTURER_STRING);
-        out.product = try self.string(io, "PRODUCT", ioctl.GET_PRODUCT_STRING);
-        out.serial_number = try self.string(io, "SERIALNUMBER", ioctl.GET_SERIALNUMBER_STRING);
+        out.manufacturer = try self.string(io, "HidD_GetManufacturerString", hid.HidD_GetManufacturerString);
+        out.product = try self.string(io, "HidD_GetProductString", hid.HidD_GetProductString);
+        out.serial_number = try self.string(io, "HidD_GetSerialNumberString", hid.HidD_GetSerialNumberString);
     }
 
-    /// One of the three string requests, converted from UTF-16.
+    /// One of the three device strings, converted from UTF-16.
     ///
-    /// A device that reports no such string answers with an empty one rather
-    /// than failing, and a device that fails the request outright is treated
-    /// the same way: a missing serial number is not a reason to refuse to
+    /// These are the one place this backend uses the documented `HidD_*`
+    /// functions rather than the control code behind them, and the reason is
+    /// evidence rather than principle: issuing `IOCTL_HID_GET_*_STRING`
+    /// directly on a handle answers `STATUS_NOT_SUPPORTED`, which is what
+    /// Microsoft's own pages quietly imply when they say those requests are
+    /// for kernel-mode drivers and that user-mode applications call
+    /// `HidD_GetManufacturerString` and friends.
+    ///
+    /// Nothing is lost by it. The argument for the control codes is that they
+    /// go through `Io` and so can be cancelled and timed out, which matters
+    /// for reading reports and does not matter here: these are read once
+    /// while enumerating, from a blob the driver already holds, and they do
+    /// not wait on the device.
+    ///
+    /// A device that reports no such string, or refuses the request, gets an
+    /// empty one: a missing serial number is not a reason to refuse to
     /// describe the device.
     fn string(
         self: *Device,
         io: std.Io,
         what: []const u8,
-        code: windows.CTL_CODE,
+        // `BOOLEAN` is a private alias for `u8` inside zigwin32's `hid.zig`,
+        // so it is spelled out here. Note it is not a Zig `bool`.
+        comptime get: *const fn (?windows.HANDLE, ?*anyopaque, u32) callconv(.winapi) u8,
     ) (errors.DeviceError || std.Io.Cancelable)!Str {
-        // The maximum a HID string descriptor can carry is 126 UTF-16 units.
+        _ = io;
+        // The most a HID string descriptor can carry is 126 UTF-16 units.
         var wide_buf: [128]u16 = undefined;
-        const got = self.call(io, what, code, &.{}, std.mem.sliceAsBytes(&wide_buf)) catch |err| switch (err) {
-            error.Canceled => return error.Canceled,
-            else => return .empty,
-        };
+        @memset(&wide_buf, 0);
+        if (get(self.file.handle, @ptrCast(&wide_buf), @sizeOf(@TypeOf(wide_buf))) == 0) {
+            log.warn("{s}: {t}", .{ what, k32.GetLastError() });
+            return .empty;
+        }
 
-        const units = wide_buf[0 .. got / 2];
-        const trimmed = std.mem.sliceTo(units, 0);
+        const trimmed = std.mem.sliceTo(&wide_buf, 0);
         if (trimmed.len == 0) return .empty;
 
         var utf8: [Str.max_len]u8 = undefined;

@@ -271,9 +271,21 @@ fn addCheckStep(
         // without the SDK for it.
         configure(b, module, false);
 
+        // Not the library module directly. Zig analyzes lazily and a library
+        // exports no symbols, so compiling it alone reaches almost nothing --
+        // `tools/check_root.zig` is what forces every declaration and every
+        // field layout to be looked at. See the comment at the top of that
+        // file for the bug that taught me the difference.
+        const root = b.createModule(.{
+            .root_source_file = b.path("tools/check_root.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        root.addImport("hidapi", module);
+
         check_step.dependOn(&b.addObject(.{
             .name = b.fmt("hidapi-{t}-{t}", .{ query.cpu_arch.?, query.os_tag.? }),
-            .root_module = module,
+            .root_module = root,
         }).step);
     }
 
