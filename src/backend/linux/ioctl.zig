@@ -304,7 +304,9 @@ pub const IOCtlResult = union(enum) {
 /// A failing syscall is reported as `.failure` rather than an error, leaving
 /// each caller to decide which `errno` values matter to it. The error union
 /// only covers a failure to dispatch the call through `io` in the first place.
-pub fn ioctl(io: std.Io, fd: linux.fd_t, request: u32, arg: usize) !IOCtlResult {
+pub const IOCtlError = std.Io.Cancelable || std.Io.ConcurrentError;
+
+pub fn ioctl(io: std.Io, fd: linux.fd_t, request: u32, arg: usize) IOCtlError!IOCtlResult {
     var future = try io.concurrent(_ioctl, .{ fd, request, arg });
     defer _ = future.cancel(io);
     const rc = future.await(io);

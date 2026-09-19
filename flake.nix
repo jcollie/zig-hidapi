@@ -41,6 +41,7 @@
               pkgs.pinact
               pkgs.radicle-node
               pkgs.reuse
+              pkgs.typos
               pkgs.zig_0_16
             ];
           };

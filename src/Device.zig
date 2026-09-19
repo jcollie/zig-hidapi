@@ -3,7 +3,23 @@
 
 //! An open HID device, and every operation on one.
 //!
-//! This is the portable half: it holds the conventions that are the same
+//! ```
+//! var dev: hidapi.Device = undefined;
+//! try dev.open(io, info.id, .{});
+//! defer dev.close(io);
+//!
+//! var buf: [64]u8 = undefined;
+//! const report = try dev.read(io, &buf);
+//! ```
+//!
+//! A `Device` is storage the caller owns and uses through a pointer, and it
+//! must not be moved between `open` and `close`. That is not the shape a
+//! two-word handle would want, and it is not negotiable: on macOS IOKit is
+//! handed this pointer at open time and calls back on it from another thread
+//! for the life of the device. One signature for all four backends is worth
+//! more than a smaller type on the three where it would fit.
+//!
+//! This is the portable half. It holds the conventions that are the same
 //! everywhere -- the report ID in the first byte, what an empty answer means,
 //! which errors callers see -- and forwards the system calls to the backend
 //! for the operating system being built for. `src/backend.zig` picks that
@@ -11,194 +27,183 @@
 //!
 //! Every method takes a `std.Io` and dispatches its syscall through it rather
 //! than issuing it directly, which leaves the choice of how to wait up to the
-//! caller's `Io` implementation. The call itself still completes before the
-//! method returns; see `read` for the one that can wait indefinitely.
+//! caller's `Io` implementation.
 //!
-//! Methods that wrap an ioctl report any failure as `error.HIDError`, logging
-//! the underlying `errno` at warning level.
+//! **Every buffer here begins with the report ID**, which is `0x00` for a
+//! device that does not use numbered reports. A sixteen byte report is
+//! seventeen bytes of buffer. This is the convention the HID specification
+//! forces and every HID library shares; forgetting it is the single most
+//! common way to get a device to ignore you.
 
 const Device = @This();
 
 const std = @import("std");
 
 const backend = @import("backend.zig");
-const impl = backend.impl;
+const errors = @import("errors.zig");
+const DeviceId = @import("DeviceId.zig");
 const DeviceInfo = @import("DeviceInfo.zig");
 
-/// The minor number of the `hidraw` node, i.e. the `N` in `/dev/hidrawN`.
-minor: impl.Minor,
-/// Handle for the open device.
-fd: impl.Handle,
+/// Backend state, inline, so that the library allocates nothing and the
+/// storage is the caller's.
+impl: backend.impl.Device,
 
-/// Open `/dev/hidraw{minor}` for reading and writing.
+/// How to open a device.
+pub const OpenOptions = struct {
+    /// Backing store for input reports that arrive before the caller asks for
+    /// one.
+    ///
+    /// Only macOS and Windows queue in user space and need it: on macOS
+    /// reports arrive on a callback whether anyone is reading or not, and on
+    /// Windows the class driver's own ring is what this replaces. Linux and
+    /// FreeBSD let the kernel do it -- hidraw buffers 64 reports on both --
+    /// and ignore this entirely.
+    ///
+    /// `error.BufferTooSmall` if it cannot hold a single input report from the
+    /// device being opened.
+    input_queue: []u8 = &.{},
+
+    /// Open the device exclusively, so that nothing else receives events from
+    /// it while it is held.
+    ///
+    /// Off by default, which differs from the C hidapi: that library seizes
+    /// the device on macOS for backward compatibility with its own history.
+    /// Seizing stops the device working for everything else on the machine,
+    /// and on a device the system has claimed it simply fails, so it is a
+    /// thing to ask for rather than a thing to get.
+    exclusive: bool = false,
+
+    /// How long a control transfer may take before it is abandoned.
+    ///
+    /// Only macOS reads this, where a synchronous IOKit call cannot be
+    /// cancelled and a wedged device would otherwise hold a task forever.
+    request_timeout: std.Io.Timeout = .{
+        .duration = .{ .raw = .fromSeconds(5), .clock = .awake },
+    },
+};
+
+/// Open the device that `id` names, as an `Enumerator` reported it.
 ///
-/// The caller owns the returned device and must `close` it.
+/// Fails with `error.DeviceNotFound` when nothing answers to that ID -- which
+/// includes a device unplugged since it was enumerated -- and
+/// `error.AccessDenied` when the process may not talk to it, which is the
+/// usual answer for an unprivileged process on Linux and FreeBSD and for a
+/// keyboard or pointing device on Windows. The README says how to fix each.
 ///
-/// Fails with `error.HIDDeviceDoesNotExist` when there is no such node and
-/// `error.HIDDeviceNoAccess` when the caller lacks permission to open it,
-/// which is the common case for an unprivileged process; see the udev rule
-/// in the README.
-pub fn open(io: std.Io, minor: impl.Minor) !Device {
-    return .{
-        .minor = minor,
-        .fd = try impl.open(io, minor),
-    };
+/// The caller owns the device and must `close` it.
+pub fn open(
+    dev: *Device,
+    io: std.Io,
+    id: DeviceId,
+    options: OpenOptions,
+) errors.OpenError!void {
+    return dev.impl.open(io, id, options);
 }
 
-/// Close the device. Errors are not reported.
-pub fn close(self: Device, io: std.Io) void {
-    impl.close(io, self.fd);
+/// Close the device. Errors are not reported, because there is nothing a
+/// caller could do about one.
+pub fn close(dev: *Device, io: std.Io) void {
+    dev.impl.close(io);
 }
 
-/// Get the size in bytes of the device's HID report descriptor.
+/// Read an input report, waiting until the device sends one.
 ///
-/// Never exceeds `max_report_descriptor_size`.
-pub fn getReportDescriptorSize(self: Device, io: std.Io) !u32 {
-    return impl.getReportDescriptorSize(io, self.fd);
+/// Input reports arrive on the interrupt IN endpoint. The first byte is the
+/// report ID if the device uses numbered reports.
+///
+/// This waits indefinitely: a device that is simply idle, such as a mouse
+/// nobody is touching, never returns from it. Use `readTimeout` for anything
+/// that has to stay responsive, and cancel the task through `io` to stop a
+/// read that is already waiting.
+///
+/// Returns `error.DeviceDisconnected` when the device goes away, which is the
+/// ordinary end of a read loop rather than a failure to report.
+pub fn read(dev: *Device, io: std.Io, buf: []u8) errors.ReadError![]u8 {
+    return dev.impl.read(io, buf);
 }
 
-/// The largest report descriptor any device will report, so a buffer this
-/// size always holds one.
-pub const max_report_descriptor_size = impl.max_report_descriptor_len;
-
-/// Copy the device's HID report descriptor into `buf` and return the
-/// portion written.
+/// Write an output report.
 ///
-/// Returns `error.BufferTooSmall` if `buf` is shorter than the descriptor;
-/// size it with `getReportDescriptorSize`, or use
-/// `max_report_descriptor_size` to be sure it always fits.
-pub fn getReportDescriptor(self: Device, io: std.Io, buf: []u8) ![]const u8 {
-    return impl.getReportDescriptor(io, self.fd, buf);
+/// The first byte of `report` is the report ID, `0x00` for a device that does
+/// not use numbered reports. The report goes to the first OUT endpoint if the
+/// device has one, and over the control endpoint if it does not.
+pub fn write(dev: *Device, io: std.Io, report: []const u8) errors.WriteError!usize {
+    return dev.impl.write(io, report);
 }
 
-/// Get the device's vendor and product strings, UTF-8 encoded.
+/// Send a feature report over the control endpoint.
 ///
-/// Returns `null` when the device reports no name at all. Otherwise the
-/// result aliases `buf` and is NUL terminated.
-///
-/// Returns `error.BufferTooSmall` if `buf` cannot hold the name and its
-/// terminator. 256 bytes is enough for any name the kernel will report.
-pub fn getRawName(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
-    return impl.getRawName(io, self.fd, buf);
+/// The first byte of `report` is the report ID.
+pub fn sendFeatureReport(
+    dev: *Device,
+    io: std.Io,
+    report: []const u8,
+) errors.ReportError!usize {
+    return dev.impl.sendFeatureReport(io, report);
 }
 
-/// Get the device's `uniq` string, an identifier meant to be unique to the
-/// individual device: usbhid seeds it from the USB serial number string and
-/// the Bluetooth transports from the hardware (MAC) address, though a device
-/// driver may replace it with a serial of its own.
+/// Request a feature report over the control endpoint.
 ///
-/// Returns `null` when the device reports no `uniq`, which is the common
-/// case for USB devices. Otherwise the result aliases `buf` and is NUL
-/// terminated.
-///
-/// Returns `error.BufferTooSmall` if `buf` cannot hold the string and its
-/// terminator. The kernel keeps `uniq` in a 64 byte field, so a 64 byte
-/// buffer always fits.
-pub fn getRawUniq(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
-    return impl.getRawUniq(io, self.fd, buf);
+/// Set `buf[0]` to the report ID wanted. On return it is still there and the
+/// report data starts at `buf[1]`, so `buf` has to be one byte longer than the
+/// report.
+pub fn getFeatureReport(dev: *Device, io: std.Io, buf: []u8) errors.ReportError![]u8 {
+    return dev.impl.getFeatureReport(io, buf);
 }
 
-/// Get a string describing the physical address of the device.
+/// Request an input report over the control endpoint.
 ///
-/// For USB devices this is the physical path through the controller, hubs
-/// and ports; for Bluetooth devices it is the hardware (MAC) address.
-///
-/// Returns `null` when the device reports no location. Otherwise the result
-/// aliases `buf` and is NUL terminated.
-pub fn getPhysicalLocation(self: Device, io: std.Io, buf: []u8) !?[:0]const u8 {
-    return impl.getPhysicalLocation(io, self.fd, buf);
+/// Slower than `read` on any device with a dedicated IN endpoint, and useful
+/// for a different reason: it asks for a specific report by ID, which is how a
+/// program learns a device's initial state before it starts listening for
+/// changes.
+pub fn getInputReport(dev: *Device, io: std.Io, buf: []u8) errors.ReportError![]u8 {
+    return dev.impl.getInputReport(io, buf);
 }
 
-/// Get the device's bus type, vendor ID and product ID in a single call.
+/// The size in bytes of the device's HID report descriptor.
 ///
-/// The returned `DeviceInfo` carries this device, which the caller still
-/// owns. Prefer this over calling `getBusType`, `getVendorID` and
-/// `getProductID` separately, since each of those repeats the same work.
-pub fn getDeviceInfo(self: Device, io: std.Io) !DeviceInfo {
-    const info = try impl.getDeviceInfo(io, self.fd);
-    return .init(self, &info);
+/// Returns `error.Unsupported` on Windows; see `getReportDescriptor`.
+pub fn getReportDescriptorLen(dev: *Device, io: std.Io) errors.DescriptorError!u32 {
+    return dev.impl.getReportDescriptorLen(io);
 }
 
-/// Get the bus the device is attached to.
+/// Copy the device's HID report descriptor into `buf`.
 ///
-/// `BUS` is non-exhaustive, because the system may report a bus this library
-/// does not name yet.
-pub fn getBusType(self: Device, io: std.Io) !impl.BUS {
-    return (try impl.getDeviceInfo(io, self.fd)).bustype;
+/// Size `buf` with `getReportDescriptorLen`, or use
+/// `max_report_descriptor_len` to be sure it always fits.
+///
+/// Returns `error.Unsupported` on Windows, where the HID class driver keeps
+/// only its own parsed form of the descriptor and does not serve the original
+/// bytes to user mode at all. There is no way around that short of
+/// reconstructing a descriptor from the parsed form, which produces something
+/// equivalent but not identical, and this library would rather say it cannot
+/// than hand back bytes the device never sent.
+pub fn getReportDescriptor(
+    dev: *Device,
+    io: std.Io,
+    buf: []u8,
+) errors.DescriptorError![]const u8 {
+    return dev.impl.getReportDescriptor(io, buf);
 }
 
-/// Get the device's vendor ID (VID).
-pub fn getVendorID(self: Device, io: std.Io) !u16 {
-    return (try impl.getDeviceInfo(io, self.fd)).vendor;
-}
+/// The largest report descriptor any device reports, so a buffer this size
+/// always holds one.
+pub const max_report_descriptor_len = backend.impl.max_report_descriptor_len;
 
-/// Get the device's product ID (PID).
-pub fn getProductID(self: Device, io: std.Io) !u16 {
-    return (try impl.getDeviceInfo(io, self.fd)).product;
-}
-
-/// Send a Feature report to the device.
+/// Fill `out` with what the open device says about itself.
 ///
-/// Feature reports are sent over the Control endpoint as a Set_Report transfer.
-/// The first byte of `data` must contain the Report ID. For devices which
-/// only support a single report, this must be set to 0x0. The remaining
-/// bytes contain the report data. Since the Report ID is mandatory, calls
-/// to sendFeatureReport() will always contain one more byte than the report
-/// contains. For example, if a hid report is 16 bytes long, 17 bytes must be
-/// passed to sendFeatureReport(): the Report ID (or 0x0, for devices which do
-/// not use numbered reports), followed by the report data (16 bytes). In this
-/// example, the length passed in would be 17.
-pub fn sendFeatureReport(self: Device, io: std.Io, data: []const u8) !usize {
-    return impl.sendFeatureReport(io, self.fd, data);
-}
-
-/// Get a feature report from a HID device.
-///
-/// Set the first byte of `buf` to the Report ID of the report to be read. Make
-/// sure to allow space for this extra byte in `buf`. Upon return, the first
-/// byte will still contain the Report ID, and the report data will start in
-/// buf[1].
-pub fn getFeatureReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
-    return impl.getFeatureReport(io, self.fd, buf);
-}
-
-/// Get an input report from a HID device.
-///
-/// Set the first byte of `buf` to the report ID of the report to be read. Make
-/// sure to allow space for this extra byte in `buf`. Upon return, the first
-/// byte will still contain the report ID, and the report data will start in
-/// `buf[1]`.
-pub fn getInputReport(self: Device, io: std.Io, buf: []u8) ![]const u8 {
-    return impl.getInputReport(io, self.fd, buf);
-}
-
-/// Write an output report to a HID device.
-///
-/// The first byte of `buf` must contain the report ID. For devices which
-/// only support a single report, this must be set to 0x0. The remaining
-/// bytes contain the report data. Since the report ID is mandatory, calls
-/// to `write()` will always contain one more byte than the report contains.
-/// For example, if a HID report is 16 bytes long, 17 bytes must be passed
-/// to `write()`, the report ID (or 0x0, for devices with a single report),
-/// followed by the report data (16 bytes).
-///
-/// write() will send the data on the first OUT endpoint, if one exists. If it
-/// does not, it will send the data through the Control Endpoint (Endpoint 0).
-pub fn write(self: Device, io: std.Io, buf: []const u8) !usize {
-    return impl.write(io, self.fd, buf);
-}
-
-/// Read an input report from a HID device.
-///
-/// Input reports are returned to the host through the INTERRUPT IN endpoint.
-/// The first byte will contain the report number if the device uses numbered
-/// reports.
-///
-/// The device is opened in blocking mode, so this waits until the device sends
-/// a report. A device that is simply idle, such as a mouse nobody is touching,
-/// will not return from this call.
-pub fn read(self: Device, io: std.Io, data: []u8) ![]const u8 {
-    return impl.read(io, self.fd, data);
+/// This answers less than enumeration does, because it asks the HID device
+/// rather than the system: on Linux `manufacturer` is not reported here at all
+/// and `product` carries the vendor and product strings run together. A caller
+/// that wants the full picture should keep the `DeviceInfo` the `Enumerator`
+/// produced rather than re-reading it from the open device.
+pub fn getInfo(
+    dev: *Device,
+    io: std.Io,
+    out: *DeviceInfo,
+) (errors.DeviceError || std.Io.Cancelable)!void {
+    return dev.impl.getInfo(io, out);
 }
 
 test {
@@ -209,44 +214,53 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-test "read-only ioctls against attached devices" {
+test "read-only operations against attached devices" {
     const io = std.testing.io;
+    const Enumerator = @import("Enumerator.zig");
 
-    var buf: [256]u8 = undefined;
-    var descriptor: [max_report_descriptor_size]u8 = undefined;
+    var scratch: [Enumerator.recommended_scratch]u8 = undefined;
+    var devices: Enumerator = undefined;
+    try devices.init(io, &scratch, .{});
+    defer devices.deinit(io);
+
+    var descriptor: [max_report_descriptor_len]u8 = undefined;
     var checked: usize = 0;
 
-    for (0..64) |minor| {
-        const device = open(io, @intCast(minor)) catch continue;
-        defer device.close(io);
+    while (try devices.next(io)) |listed| {
+        var dev: Device = undefined;
+        // Enumeration needs no permission and opening does, so most devices
+        // on an unprivileged run are listed and then refused. That is the
+        // point of the split, and not a reason to fail the test.
+        dev.open(io, listed.id, .{}) catch continue;
+        defer dev.close(io);
 
         // Only side-effect-free calls belong here, because this runs against
-        // whatever hardware happens to be attached. `read` blocks until the
-        // device sends a report, and `write` and `sendFeatureReport` change
-        // device state, so all three are covered by the reference above only.
-        const info = try device.getDeviceInfo(io);
-        try std.testing.expectEqual(info.bustype, try device.getBusType(io));
-        try std.testing.expectEqual(info.vendor, try device.getVendorID(io));
-        try std.testing.expectEqual(info.product, try device.getProductID(io));
+        // whatever hardware happens to be attached. `read` waits for a report
+        // that an idle device never sends, and `write` and `sendFeatureReport`
+        // change device state, so all three are covered by the reference
+        // above only.
+        var opened: DeviceInfo = undefined;
+        try dev.getInfo(io, &opened);
 
-        _ = try device.getPhysicalLocation(io, &buf);
+        // The device and the system have to agree about what it is. This is
+        // the assertion that would catch the sysfs walk reading the wrong
+        // parent, which is the one mistake in enumeration that produces
+        // plausible answers rather than obvious ones.
+        try std.testing.expectEqual(listed.vendor_id, opened.vendor_id);
+        try std.testing.expectEqual(listed.product_id, opened.product_id);
+        try std.testing.expectEqual(listed.native_bus, opened.native_bus);
 
-        // A buffer that cannot hold the name and its terminator has to be
-        // reported. The ioctl truncates without terminating, so getting this
-        // wrong trips the sentinel check on the returned slice instead.
-        if (try device.getRawName(io, &buf)) |name| {
-            const exact = name.len + 1;
-            try std.testing.expect(try device.getRawName(io, buf[0..exact]) != null);
-            try std.testing.expectError(
-                error.BufferTooSmall,
-                device.getRawName(io, buf[0 .. exact - 1]),
-            );
-        }
+        const len = try dev.getReportDescriptorLen(io);
+        try std.testing.expect(len <= max_report_descriptor_len);
+        const bytes = try dev.getReportDescriptor(io, descriptor[0..len]);
+        try std.testing.expectEqual(@as(usize, len), bytes.len);
 
-        const size = try device.getReportDescriptorSize(io);
-        try std.testing.expect(size <= max_report_descriptor_size);
-        const bytes = try device.getReportDescriptor(io, descriptor[0..size]);
-        try std.testing.expectEqual(@as(usize, size), bytes.len);
+        // A buffer one byte short of the descriptor has to be reported rather
+        // than quietly filled.
+        if (len > 0) try std.testing.expectError(
+            error.BufferTooSmall,
+            dev.getReportDescriptor(io, descriptor[0 .. len - 1]),
+        );
 
         checked += 1;
     }

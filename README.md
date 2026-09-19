@@ -5,23 +5,32 @@ SPDX-License-Identifier: MIT
 
 # zig-hidapi
 
-A pure-Zig library for talking to USB and Bluetooth HID devices on Linux
-through the kernel's [hidraw](https://docs.kernel.org/hid/hidraw.html)
-interface.
+A Zig library for talking to USB and Bluetooth HID devices, without linking
+the C [hidapi](https://github.com/libusb/hidapi) library.
 
-Unlike bindings to the C [hidapi](https://github.com/libusb/hidapi) library,
-this package has no C dependency at all. It issues the `HIDIOC*` ioctls
-directly against `/dev/hidraw*` and is built on Zig 0.16's `std.Io` interface,
-so every blocking operation is dispatched through the caller's I/O
-implementation rather than blocking a thread outright.
+On Linux it issues the `HIDIOC*` ioctls directly against `/dev/hidraw*` and
+reads `/sys/class/hidraw` for everything that can be learned without opening a
+device, so a Linux build links no C at all. It is built on Zig 0.16's `std.Io`
+interface, so every blocking operation is dispatched through the caller's I/O
+implementation rather than blocking a thread outright, and it allocates
+nothing: every buffer it needs is one the caller supplies.
+
+## Supported systems
+
+| System | Interface | Status |
+| --- | --- | --- |
+| Linux | `hidraw` and `/sys/class/hidraw` | supported |
+| FreeBSD | `hidraw(4)` | planned |
+| Windows | HIDCLASS through `NtDeviceIoControlFile` | planned |
+| macOS | IOKit `IOHIDManager` | planned |
+
+Building for a system with no backend is a compile error naming the ones there
+are, rather than a failure somewhere deeper.
 
 ## Requirements
 
 - Zig 0.16
 - Linux with the `hidraw` driver (`CONFIG_HIDRAW`), i.e. `/dev/hidraw*` present
-
-Only Linux is supported. There is no Windows, macOS, or BSD backend, and none
-is planned in the current design.
 
 ## Installation
 
@@ -60,70 +69,87 @@ const hidapi = @import("hidapi");
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
 
-    var name_buf: [256]u8 = undefined;
-    var uniq_buf: [64]u8 = undefined;
-    var phys_buf: [256]u8 = undefined;
-    var it: hidapi.DeviceInfoIterator = .init;
+    var scratch: [hidapi.Enumerator.recommended_scratch]u8 = undefined;
+    var devices: hidapi.Enumerator = undefined;
+    try devices.init(io, &scratch, .{});
+    defer devices.deinit(io);
 
-    while (try it.next(io)) |info| {
-        defer info.device.close(io);
-
-        const name = try info.device.getRawName(io, &name_buf) orelse "(unnamed)";
-        const uniq = try info.device.getRawUniq(io, &uniq_buf) orelse "(none)";
-        const phys = try info.device.getPhysicalLocation(io, &phys_buf) orelse "(unknown)";
-        std.debug.print("{x:0>4}:{x:0>4} [{t}] {s} ({s}) at {s}\n", .{
-            info.vendor,
-            info.product,
-            info.bustype,
-            name,
-            uniq,
-            phys,
-        });
+    while (try devices.next(io)) |info| {
+        std.debug.print("{f} at {f}\n", .{ info, &info.id });
     }
 }
 ```
 
-The iterator walks `/dev/hidraw0` through `/dev/hidraw63`, silently skipping
-any node that does not exist or cannot be opened. Devices it yields are already
-open; the caller owns them and is responsible for closing them.
+which prints something like
 
-`getRawName`, `getRawUniq`, and `getPhysicalLocation` return an optional,
-`null` for a device that reports nothing at all, which is why the example
-supplies a placeholder. A `null` `uniq` is the common case rather than an
-oddity: usbhid only fills it in when the device carries a serial number
-string, while the Bluetooth transports always seed it from the hardware
-address. The physical location is the path through the USB controller, hubs
-and ports for a USB device, and the hardware address for a Bluetooth one, so
-it stays the same across replugs of whatever is in that port while `uniq`
-follows the device itself. The string they do return is NUL terminated and
-aliases the buffer passed in, so the example uses a separate buffer for each
-rather than letting a later call overwrite an earlier result.
+```
+046d:c090 [USB] Logitech G703 LIGHTSPEED Wireless Gaming Mouse w/ HERO (49D858E2) at /dev/hidraw4
+1050:0407 [USB] Yubico YubiKey OTP+FIDO+CCID at /dev/hidraw2
+```
 
-### Opening a device directly
+**Enumerating does not open anything.** On Linux that means it needs no
+permissions at all — `/sys/class/hidraw` is world readable where
+`/dev/hidraw*` is not — so an unprivileged process with no udev rule installed
+still sees every device attached, and only finds out what it may talk to when
+it tries to open one. It also means the `DeviceInfo` you get back is a plain
+value with nothing to close and no lifetime to track: copy it, keep it, print
+it, compare it.
+
+The scratch buffer belongs to the enumerator until `deinit` and is the caller's
+again afterwards. `recommended_scratch` is a size that works;
+`hidapi.Enumerator.min_scratch` is the floor below which `init` returns
+`error.BufferTooSmall`.
+
+### Opening a device
+
+`DeviceInfo.id` is all `Device.open` needs, and it is a value rather than a
+slice, so it can outlive the enumerator that produced it — which is how a
+program picks a device once and opens it later.
 
 ```zig
-const device = try hidapi.Device.open(io, 0); // /dev/hidraw0
+var scratch: [hidapi.Enumerator.recommended_scratch]u8 = undefined;
+var devices: hidapi.Enumerator = undefined;
+try devices.init(io, &scratch, .{ .vendor_id = 0x046d });
+defer devices.deinit(io);
+
+const id = while (try devices.next(io)) |info| {
+    if (info.usage_page == 0xff00) break info.id;
+} else return error.NoSuchDevice;
+
+var device: hidapi.Device = undefined;
+try device.open(io, id, .{});
 defer device.close(io);
 ```
 
-`open` reports `error.HIDDeviceDoesNotExist` when the node is missing and
-`error.HIDDeviceNoAccess` when permissions deny it.
+A `Device` is storage you own and use through a pointer, and it must not be
+moved between `open` and `close`.
+
+`open` reports `error.DeviceNotFound` when nothing answers to that ID, which
+includes a device unplugged since it was enumerated, and `error.AccessDenied`
+when permissions deny it.
 
 ### Reading and writing reports
 
+**Every buffer starts with the report ID**, which is `0x00` for a device that
+does not use numbered reports, so a sixteen byte report is seventeen bytes of
+buffer.
+
 ```zig
-// Write an output report. The first byte is the report ID; use 0 for
-// devices that do not use numbered reports.
+// Write an output report.
 var out: [17]u8 = @splat(0);
 out[0] = 0x00;
 out[1] = 0x42;
 _ = try device.write(io, &out);
 
-// Read an input report.
+// Read an input report. This waits until the device sends one, so a device
+// that is simply idle never returns from it.
 var in: [64]u8 = undefined;
 const report = try device.read(io, &in);
 std.debug.print("read {d} bytes\n", .{report.len});
 ```
+
+`read` returns `error.DeviceDisconnected` when the device goes away, which is
+the ordinary end of a read loop rather than a failure to report.
 
 ### Feature reports
 
@@ -141,10 +167,10 @@ std.debug.print("feature report: {x}\n", .{got});
 ### Report descriptors
 
 ```zig
-const size = try device.getReportDescriptorSize(io);
+const len = try device.getReportDescriptorLen(io);
 
-var descriptor: [4096]u8 = undefined;
-const bytes = try device.getReportDescriptor(io, descriptor[0..size]);
+var descriptor: [hidapi.max_report_descriptor_len]u8 = undefined;
+const bytes = try device.getReportDescriptor(io, descriptor[0..len]);
 std.debug.print("descriptor: {d} bytes\n", .{bytes.len});
 ```
 
@@ -156,48 +182,82 @@ CI rebuilds it whenever `main` goes green. What follows is a summary.
 
 [docs]: https://jeff.jcollie.page/zig-hidapi/
 
-### `hidapi.Device`
+### `hidapi.Enumerator`
 
-An open `hidraw` file descriptor.
+Walks the devices attached to the system, filling a `DeviceInfo` at a time into
+caller-supplied scratch. `init(io, scratch, options)`, `next(io)`,
+`deinit(io)`; `find(io, scratch, options, out)` is the one-device shorthand.
 
-| Function | Description |
-| --- | --- |
-| `open(io, minor)` | Open `/dev/hidraw{minor}` read-write |
-| `close(io)` | Close the descriptor |
-| `read(io, buf)` | Read an input report from the interrupt IN endpoint |
-| `write(io, buf)` | Write an output report (first byte is the report ID) |
-| `getInputReport(io, buf)` | Request an input report over the control endpoint |
-| `getFeatureReport(io, buf)` | Request a feature report over the control endpoint |
-| `sendFeatureReport(io, data)` | Send a feature report over the control endpoint |
-| `getReportDescriptorSize(io)` | Size of the HID report descriptor |
-| `getReportDescriptor(io, buf)` | Copy the HID report descriptor into `buf` |
-| `getRawName(io, buf)` | Vendor and product strings, UTF-8, or `null` |
-| `getRawUniq(io, buf)` | Per-device identifier (serial number or MAC), or `null` |
-| `getPhysicalLocation(io, buf)` | USB physical path or Bluetooth MAC address, or `null` |
-| `getDeviceInfo(io)` | Bus type, vendor ID, and product ID as a `DeviceInfo` |
-| `getBusType(io)` | Bus type only |
-| `getVendorID(io)` | Vendor ID only |
-| `getProductID(io)` | Product ID only |
-
-For every call that takes a report buffer, the first byte is the report ID —
-`0x00` for devices that do not use numbered reports — so the buffer must be one
-byte longer than the report itself.
+`Options` carries `vendor_id` and `product_id` filters, and `usages` and
+`strings` flags that trade completeness for speed — on Linux `strings` is four
+extra sysfs reads per device and `usages` means reading and walking a report
+descriptor for each.
 
 ### `hidapi.DeviceInfo`
 
-The `device` it was read from, plus the device's `bustype` (a `BUS` enum
-covering `USB`, `BLUETOOTH`, `I2C`, and the rest of the kernel's bus types),
-`vendor`, and `product` IDs.
+What is known about a device without talking to it: `id`, `vendor_id`,
+`product_id`, `release_number`, `usage_page`, `usage`, `interface_number`,
+`bus_type`, `native_bus`, and four strings — `manufacturer`, `product`,
+`serial_number` and `physical_location`.
 
-### `hidapi.DeviceInfoIterator`
+The strings are `hidapi.Str`, held inline rather than allocated, so the whole
+record copies freely with no lifetime attached. `str.slice()` returns `null`
+for a string the device does not report, which is a different answer from an
+empty one, and `str.truncated` says whether a longer string was cut.
 
-`init` then `next(io)` to walk the available `hidraw` nodes, as shown above.
+`serial_number` is the only field that survives a replug, and so the only
+sound way to recognise the same physical device in a later run.
+
+### `hidapi.Device`
+
+An open device. Caller-owned storage, used through a pointer.
+
+| Function | Description |
+| --- | --- |
+| `open(io, id, options)` | Open the device `id` names |
+| `close(io)` | Close it |
+| `read(io, buf)` | Read an input report from the interrupt IN endpoint |
+| `write(io, report)` | Write an output report |
+| `getInputReport(io, buf)` | Request an input report over the control endpoint |
+| `getFeatureReport(io, buf)` | Request a feature report over the control endpoint |
+| `sendFeatureReport(io, report)` | Send a feature report over the control endpoint |
+| `getReportDescriptorLen(io)` | Size of the HID report descriptor |
+| `getReportDescriptor(io, buf)` | Copy the HID report descriptor into `buf` |
+| `getInfo(io, out)` | What the open device says about itself |
+
+`getInfo` answers less than enumeration does, because it asks the HID device
+rather than the system: on Linux the manufacturer and product strings live on
+the USB device a couple of levels up, and the HID device reports only the two
+run together. Keep the `DeviceInfo` the enumerator gave you rather than
+re-reading it from the open device.
+
+### `hidapi.BusType`
+
+How a device is attached: `usb`, `bluetooth`, `i2c`, `spi`, `virtual`,
+`other`, or `unknown`. Deliberately short and exhaustive; whatever number the
+system actually reported is kept separately on `DeviceInfo.native_bus`, so
+nothing is lost by mapping into it.
+
+### Errors
+
+Every error set is named and explicit — `hidapi.OpenError`,
+`hidapi.ReadError` and the rest, or `hidapi.AnyError` for all of them at once.
+The ones worth knowing apart:
+
+- `AccessDenied` — the process may not talk to this device. See below.
+- `DeviceNotFound` — nothing answers to that ID. Enumerate again.
+- `DeviceDisconnected` — it was there and now is not. Stop.
+- `DeviceRefused` — the system or the device rejected the request. The
+  underlying `errno` is logged at warning level first.
 
 ## Permissions
 
 `/dev/hidraw*` nodes are normally root-only, so `Device.open` will fail with
-`error.HIDDeviceNoAccess` for an unprivileged process. Grant access with a udev
-rule rather than running as root — for example, in
+`error.AccessDenied` for an unprivileged process. Enumeration is unaffected —
+it reads sysfs and needs no permissions — so the usual symptom is a program
+that lists a device perfectly well and then cannot open it.
+
+Grant access with a udev rule rather than running as root — for example, in
 `/etc/udev/rules.d/70-hidraw.rules`:
 
 ```udev
@@ -287,8 +347,10 @@ shows an empty page, which is why there is a step that serves it and why `zig
 std` works the same way. `-Ddocs-port=N` chooses another port. CI publishes the
 same output to [the address above][docs].
 
-The `enumerate` test opens real devices on the host, so its results depend on
-what hardware is attached and on the permissions described above.
+The `enumerate` test lists the real devices on the host, and the
+read-only-operations test opens as many of them as it is allowed to, so both
+depend on what hardware is attached and on the permissions described above.
+The second reports `SkipZigTest` when it could open none.
 
 This repository follows the [REUSE](https://reuse.software/) specification for
 licensing metadata and uses [typos](https://github.com/crate-ci/typos) for spell

@@ -1,58 +1,97 @@
 // SPDX-FileCopyrightText: © 2024 Jeffrey C. Ollie <jeff@ocjtech.us>
 // SPDX-License-Identifier: MIT
 
-//! Talk to USB and Bluetooth HID devices on Linux through the kernel's
-//! `hidraw` interface, in pure Zig and without linking the C hidapi library.
-//! The requests go straight to `/dev/hidraw*` as `HIDIOC*` ioctls.
+//! Talk to USB and Bluetooth HID devices, in Zig, without linking the C
+//! hidapi library.
 //!
 //! This is the root of the `hidapi` module, so a dependent reaches everything
-//! here through `@import("hidapi")`. There are three types: `Device` is an
-//! open device and carries every operation, `DeviceInfo` is what identifies
-//! one, and `DeviceInfoIterator` finds the devices that are attached.
+//! here through `@import("hidapi")`. The shape of a program using it is:
+//! enumerate to find the device you want, keep its `DeviceId`, open it, and
+//! exchange reports.
+//!
+//! ```
+//! var scratch: [hidapi.Enumerator.recommended_scratch]u8 = undefined;
+//! var devices: hidapi.Enumerator = undefined;
+//! try devices.init(io, &scratch, .{ .vendor_id = 0x046d });
+//! defer devices.deinit(io);
+//!
+//! const id = while (try devices.next(io)) |info| {
+//!     if (info.usage_page == 0xFF00) break info.id;
+//! } else return error.NotFound;
+//!
+//! var dev: hidapi.Device = undefined;
+//! try dev.open(io, id, .{});
+//! defer dev.close(io);
+//! ```
 //!
 //! Every call takes a `std.Io` as its first argument and dispatches its
 //! syscall through it, so the caller decides how waiting is done. Declaring
 //! `main` with a `std.process.Init` parameter is the easiest way to come by
 //! one; a library that is not `main` constructs its own.
 //!
-//! ```
-//! var it: hidapi.DeviceInfoIterator = .init;
-//! while (try it.next(io)) |info| {
-//!     defer info.device.close(io);
+//! Nothing here allocates. Where a buffer is needed -- the report itself, the
+//! enumerator's scratch, a device's input queue -- it is the caller's.
 //!
-//!     var buf: [256]u8 = undefined;
-//!     const name = try info.device.getRawName(io, &buf) orelse "(unnamed)";
-//!     std.debug.print("{x:0>4}:{x:0>4} [{t}] {s}\n", .{
-//!         info.vendor,
-//!         info.product,
-//!         info.bustype,
-//!         name,
-//!     });
-//! }
-//! ```
+//! ## Supported systems
 //!
-//! `/dev/hidraw*` is normally root only, so opening a device as an
-//! unprivileged process fails with `error.HIDDeviceNoAccess` until a udev rule
-//! grants access; the README has one to copy.
+//! Linux, through the kernel's
+//! [hidraw](https://docs.kernel.org/hid/hidraw.html) interface and
+//! `/sys/class/hidraw`. Building for anything else is a compile error naming
+//! what is supported; see `backend.zig`.
 //!
-//! The source, the README with that rule, and the issue tracker are at
+//! ## Permissions
+//!
+//! Enumeration needs none. Opening a device does: `/dev/hidraw*` is root-only
+//! until a udev rule says otherwise, and until then `Device.open` answers
+//! `error.AccessDenied`. The README has a rule to copy.
+//!
+//! The source, that rule, and the issue tracker are at
 //! [git.jcollie.dev/jeff/zig-hidapi](https://git.jcollie.dev/jeff/zig-hidapi).
 
 const std = @import("std");
 
-/// An open `hidraw` device, and every operation on one.
+/// An open HID device, and every operation on one.
 pub const Device = @import("Device.zig");
 
-/// What identifies a device: its bus, vendor ID and product ID, together with
-/// the open `Device` they were read from.
+/// Everything known about a device without talking to it.
 pub const DeviceInfo = @import("DeviceInfo.zig");
 
-/// An iterator over the `hidraw` devices attached to the system.
-pub const DeviceInfoIterator = @import("DeviceInfoIterator.zig");
+/// What names a device to the operating system; all `Device.open` needs.
+pub const DeviceId = @import("DeviceId.zig");
+
+/// Walks the devices attached to the system.
+pub const Enumerator = @import("Enumerator.zig");
+
+/// The transport a device is attached by.
+pub const BusType = @import("bus_type.zig").BusType;
+
+/// A short string a device reported about itself, held by value.
+pub const Str = @import("Str.zig");
+
+/// Just enough of a report descriptor parser to say what a device is for.
+pub const descriptor = @import("descriptor.zig");
+
+/// The largest report descriptor any device reports.
+pub const max_report_descriptor_len = Device.max_report_descriptor_len;
+
+const errors = @import("errors.zig");
+
+pub const DeviceError = errors.DeviceError;
+pub const OpenError = errors.OpenError;
+pub const EnumerateError = errors.EnumerateError;
+pub const ReadError = errors.ReadError;
+pub const WriteError = errors.WriteError;
+pub const ReportError = errors.ReportError;
+pub const DescriptorError = errors.DescriptorError;
+/// Every error any call in this library can return.
+pub const AnyError = errors.AnyError;
 
 test {
-    // Referencing the three types here is what draws their files into the
+    // Referencing the types here is what draws their files into the
     // compilation, which is in turn what makes their own tests part of the
     // test build.
     std.testing.refAllDecls(@This());
+    _ = @import("backend.zig");
+    _ = @import("backend/contract.zig");
+    _ = errors;
 }

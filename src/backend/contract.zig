@@ -18,11 +18,15 @@
 
 const std = @import("std");
 
-/// The declarations `Device` reaches for, in the order it needs them.
+/// The declarations a backend's root has to carry.
 pub const required = [_][]const u8{
-    // The open device itself.
-    "Handle",
-    "Minor",
+    "Device",
+    "Enumerator",
+    "max_report_descriptor_len",
+};
+
+/// The methods `Device` forwards to.
+pub const device_required = [_][]const u8{
     "open",
     "close",
 
@@ -36,27 +40,37 @@ pub const required = [_][]const u8{
     "getInputReport",
 
     // What the device says about itself.
-    "getReportDescriptorSize",
+    "getReportDescriptorLen",
     "getReportDescriptor",
-    "getRawName",
-    "getRawUniq",
-    "getPhysicalLocation",
-    "getDeviceInfo",
-
-    // The types those last two hand back.
-    "BUS",
-    "DevInfo",
+    "getInfo",
 };
 
-/// Fail the build, naming the missing declaration, if `impl` is not a complete
+/// The methods `Enumerator` forwards to, and the two sizes it republishes.
+pub const enumerator_required = [_][]const u8{
+    "init",
+    "deinit",
+    "next",
+    "min_scratch",
+    "recommended_scratch",
+};
+
+/// Fail the build, naming what is missing, if `impl` is not a complete
 /// backend. Called from `backend.zig` at container scope so that it runs for
 /// whichever backend was selected, whether or not anything calls into it yet.
 pub fn check(comptime impl: type) void {
     comptime {
-        for (required) |name| {
-            if (!@hasDecl(impl, name)) @compileError(
-                "backend " ++ @typeName(impl) ++ " is missing `" ++ name ++
-                    "`; every declaration in src/backend/contract.zig has to be present",
+        expect(impl, "backend", &required);
+        if (@hasDecl(impl, "Device")) expect(impl.Device, "backend Device", &device_required);
+        if (@hasDecl(impl, "Enumerator")) expect(impl.Enumerator, "backend Enumerator", &enumerator_required);
+    }
+}
+
+fn expect(comptime T: type, comptime what: []const u8, comptime names: []const []const u8) void {
+    comptime {
+        for (names) |name| {
+            if (!@hasDecl(T, name)) @compileError(
+                what ++ " " ++ @typeName(T) ++ " is missing `" ++ name ++
+                    "`; the full list is in src/backend/contract.zig",
             );
         }
     }
@@ -68,8 +82,10 @@ test {
 
 test "the selected backend satisfies the contract" {
     // `backend.zig` already runs this at container scope, so reaching it here
-    // proves only that the list above is not empty and that `check` compiles
+    // proves only that the lists above are not empty and that `check` compiles
     // when called from somewhere other than its one real call site.
     try std.testing.expect(required.len > 0);
+    try std.testing.expect(device_required.len > 0);
+    try std.testing.expect(enumerator_required.len > 0);
     check(@import("../backend.zig").impl);
 }
