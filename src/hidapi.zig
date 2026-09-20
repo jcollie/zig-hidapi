@@ -68,7 +68,8 @@ pub const BusType = @import("bus_type.zig").BusType;
 /// A short string a device reported about itself, held by value.
 pub const Str = @import("Str.zig");
 
-/// Just enough of a report descriptor parser to say what a device is for.
+/// Reading a report descriptor: the raw items, the fields they describe, and
+/// pulling a field's value out of a report.
 pub const descriptor = @import("descriptor.zig");
 
 /// The largest report descriptor any device reports.

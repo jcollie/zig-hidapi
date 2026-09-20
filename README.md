@@ -268,6 +268,49 @@ const bytes = try device.getReportDescriptor(io, descriptor[0..len]);
 std.debug.print("descriptor: {d} bytes\n", .{bytes.len});
 ```
 
+### Making sense of a report
+
+A report on its own is a handful of opaque bytes. The report descriptor says
+what is in them, and `hidapi.descriptor` reads it:
+
+```zig
+var buf: [hidapi.max_report_descriptor_len]u8 = undefined;
+const len = try device.getReportDescriptorLen(io);
+const bytes = try device.getReportDescriptor(io, buf[0..len]);
+
+var parser: hidapi.descriptor.Parser = .init(bytes);
+while (try parser.next()) |field| {
+    if (field.kind != .input or field.flags.constant) continue;
+    for (0..field.count) |i| {
+        const index: u16 = @intCast(i);
+        const value = field.extract(report, index) orelse continue;
+        std.debug.print("{x:0>8} = {d}\n", .{ field.usageAt(index) orelse 0, value });
+    }
+}
+```
+
+For the mouse on my desk that prints the sixteen buttons, then X, Y, the wheel
+and AC Pan, each with its usage and its value — and the signed fields come back
+signed, because a field whose logical minimum is negative is the only thing
+that says so.
+
+Each `Field` is one main item: `report_id`, `kind`, `bit_offset`, `bit_size`,
+`count`, the usage page and usages, the logical and physical ranges, the unit,
+the flags, and the `collections` enclosing it. `extract(body, index)` reads one
+element out of a report body — that is the report *without* any leading report
+ID byte, so pass `report[1..]` for a device that uses them.
+`descriptor.reportLength` gives the length of a report, counting the ID byte
+where there is one.
+
+There are two cheaper levels for code that wants less. `descriptor.firstUsage`
+answers only what the device is, which is what enumeration uses to fill in
+`usage_page` and `usage`. `descriptor.Iterator` walks the raw items for code
+that wants the descriptor exactly as written.
+
+Nothing in it allocates: a `Parser` is a value you own, and the slices a
+`Field` hands back point into it and stay valid until the next `next` — the
+same rule `Enumerator` follows.
+
 ## API overview
 
 The full reference is generated from the doc comments in the source, covers
@@ -325,6 +368,13 @@ rather than the system: on Linux the manufacturer and product strings live on
 the USB device a couple of levels up, and the HID device reports only the two
 run together. Keep the `DeviceInfo` the enumerator gave you rather than
 re-reading it from the open device.
+
+### `hidapi.descriptor`
+
+Reading a report descriptor. `Parser` yields a `Field` per main item with its
+position, size, usages and ranges resolved; `Field.extract` reads a value out
+of a report; `Iterator` walks the raw items; `firstUsage` answers the cheap
+question. See above.
 
 ### `hidapi.BusType`
 
