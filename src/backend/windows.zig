@@ -155,7 +155,7 @@ pub const Device = struct {
         const path = try wide(id.slice(), &path_buf);
 
         var readable = true;
-        const handle = openPath(io, path, generic_read_write) catch |err| switch (err) {
+        const handle = openPath(io, path, generic_read_write, .quiet) catch |err| switch (err) {
             error.Canceled => return error.Canceled,
             // The system opens keyboards and pointing devices exclusively, so
             // a read-write open of one is refused outright. A zero-access
@@ -164,7 +164,9 @@ pub const Device = struct {
             // never be read. The C hidapi does the same.
             error.AccessDenied, error.DeviceRefused => blk: {
                 readable = false;
-                break :blk try openPath(io, path, no_access);
+                // This one is worth hearing about: if even a metadata-only
+                // open is refused, the device cannot be described at all.
+                break :blk try openPath(io, path, no_access, .loud);
             },
             else => |e| return e,
         };
@@ -522,15 +524,30 @@ fn openPath(
     io: std.Io,
     path: [:0]const u16,
     access: fs.FILE_ACCESS_FLAGS,
+    report: Report,
 ) errors.OpenError!windows.HANDLE {
-    var p = io.concurrent(createFile, .{ path, access }) catch return error.SystemResources;
+    var p = io.concurrent(createFile, .{ path, access, report }) catch
+        return error.SystemResources;
     defer _ = p.cancel(io) catch {};
     return try p.await(io);
 }
 
+/// Whether a failed open is worth saying anything about.
+///
+/// The read-write attempt is *expected* to fail for every device the system
+/// holds exclusively, which is most of the interesting ones, and the
+/// metadata-only open behind it is the designed answer rather than a
+/// consolation. Logging the first refusal made an ordinary keyboard look
+/// broken every time it was listed.
+const Report = enum { quiet, loud };
+
 /// `CreateFileW` has no `Io.Operation`, so this is the one place the old
 /// `io.concurrent` convention is still the only option.
-fn createFile(path: [:0]const u16, access: fs.FILE_ACCESS_FLAGS) errors.OpenError!windows.HANDLE {
+fn createFile(
+    path: [:0]const u16,
+    access: fs.FILE_ACCESS_FLAGS,
+    report: Report,
+) errors.OpenError!windows.HANDLE {
     const handle = k32.CreateFileW(
         path.ptr,
         access,
@@ -547,7 +564,7 @@ fn createFile(path: [:0]const u16, access: fs.FILE_ACCESS_FLAGS) errors.OpenErro
     );
     if (handle == foundation.INVALID_HANDLE_VALUE) {
         const err = k32.GetLastError();
-        log.warn("CreateFileW: {t}", .{err});
+        if (report == .loud) log.warn("CreateFileW: {t}", .{err});
         return switch (err) {
             .ERROR_ACCESS_DENIED => error.AccessDenied,
             .ERROR_SHARING_VIOLATION => error.DeviceRefused,
