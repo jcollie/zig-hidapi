@@ -47,6 +47,9 @@ const log = std.log.scoped(.hidapi_freebsd);
 /// The largest report descriptor the kernel will hand out.
 pub const max_report_descriptor_len = hidraw.max_report_descriptor_len;
 
+/// Zero; see `hidraw.recommended_descriptor_scratch`.
+pub const recommended_descriptor_scratch = hidraw.recommended_descriptor_scratch;
+
 /// The group every `hidraw(4)` request is numbered in. Linux uses `'H'`.
 const group = 'U';
 

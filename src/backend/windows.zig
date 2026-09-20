@@ -52,6 +52,7 @@ const foundation = win32.foundation;
 
 const ioctl = @import("windows/ioctl.zig");
 const path_util = @import("windows/path.zig");
+const reconstruct = @import("windows/reconstruct.zig");
 
 const descriptor = @import("../descriptor.zig");
 const errors = @import("../errors.zig");
@@ -68,6 +69,13 @@ const log = std.log.scoped(.hidapi_windows);
 /// Nothing here can produce a report descriptor, but the declaration is part
 /// of the backend contract and callers size buffers with it.
 pub const max_report_descriptor_len = 4096;
+
+/// Comfortable working memory for rebuilding a descriptor.
+///
+/// The tables are sized by the number of collections times the number of
+/// report IDs a device actually uses, plus one list node per field. Sixteen
+/// kilobytes covers a device far more complicated than anything in practice.
+pub const recommended_descriptor_scratch = 16 * 1024;
 
 /// `GENERIC_READ | GENERIC_WRITE`.
 ///
@@ -124,6 +132,11 @@ pub const Device = struct {
     usage_page: u16,
     usage: u16,
 
+    /// Working memory for rebuilding the report descriptor, from
+    /// `OpenOptions`. Empty when the caller did not ask for it, in which case
+    /// `getReportDescriptor` stays `error.Unsupported`.
+    descriptor_scratch: []u8,
+
     /// False when the device could only be opened for metadata, which is what
     /// happens for anything the system holds exclusively -- keyboards and
     /// pointing devices, in practice. Reading or writing such a device is
@@ -136,8 +149,6 @@ pub const Device = struct {
         id: DeviceId,
         options: OpenOptions,
     ) errors.OpenError!void {
-        _ = options;
-
         var path_buf: [DeviceId.max_len]u16 = undefined;
         const path = try wide(id.slice(), &path_buf);
 
@@ -167,6 +178,7 @@ pub const Device = struct {
             .feature_report_len = 0,
             .usage_page = 0,
             .usage = 0,
+            .descriptor_scratch = options.descriptor_scratch,
             .readable = readable,
         };
 
@@ -357,20 +369,49 @@ pub const Device = struct {
         return 0;
     }
 
-    /// Always `error.Unsupported`; see the note at the top of this file.
+    /// The size of the descriptor this backend will rebuild.
+    ///
+    /// Measured by running the reconstruction with nowhere to put the result,
+    /// which costs the same as building it. A caller that is about to ask for
+    /// the descriptor anyway should size its buffer with
+    /// `max_report_descriptor_len` instead and skip this.
     pub fn getReportDescriptorLen(self: *Device, io: std.Io) errors.DescriptorError!u32 {
-        _ = .{ self, io };
-        return error.Unsupported;
+        var blob_buf: [max_report_descriptor_len]u8 = undefined;
+        const blob = try self.preparsedFor(io, &blob_buf);
+        const len = reconstruct.measure(blob, self.descriptor_scratch) catch |err|
+            return mapReconstruct(err);
+        return @intCast(len);
     }
 
-    /// Always `error.Unsupported`; see the note at the top of this file.
+    /// Rebuild the device's report descriptor; see the note at the top of
+    /// this file about what "rebuild" costs.
     pub fn getReportDescriptor(
         self: *Device,
         io: std.Io,
         buf: []u8,
     ) errors.DescriptorError![]const u8 {
-        _ = .{ self, io, buf };
-        return error.Unsupported;
+        var blob_buf: [max_report_descriptor_len]u8 = undefined;
+        const blob = try self.preparsedFor(io, &blob_buf);
+        return reconstruct.reconstruct(blob, buf, self.descriptor_scratch) catch |err|
+            return mapReconstruct(err);
+    }
+
+    /// Fetch the preparsed data, refusing early when there is nowhere to
+    /// rebuild from it.
+    fn preparsedFor(self: *Device, io: std.Io, buf: []u8) errors.DescriptorError![]const u8 {
+        if (self.descriptor_scratch.len == 0) {
+            log.warn(
+                "getReportDescriptor: the device was opened without " ++
+                    "OpenOptions.descriptor_scratch, and Windows keeps no descriptor to read",
+                .{},
+            );
+            return error.Unsupported;
+        }
+        return self.getPreparsedData(io, buf) catch |err| switch (err) {
+            error.Canceled => error.Canceled,
+            error.BufferTooSmall => error.BufferTooSmall,
+            else => error.Unsupported,
+        };
     }
 
     /// The class driver's own parsed form of the report descriptor.
@@ -507,6 +548,22 @@ fn createFile(path: [:0]const u16, access: fs.FILE_ACCESS_FLAGS) errors.OpenErro
         };
     }
     return handle;
+}
+
+/// Fold the reconstruction's own errors into the portable set.
+///
+/// Scratch that turned out to be too small is reported as such rather than as
+/// `Unsupported`, because the two ask different things of the caller: one is
+/// a bigger buffer, the other is that this device cannot be described.
+fn mapReconstruct(err: reconstruct.Error) errors.DescriptorError {
+    return switch (err) {
+        error.BufferTooSmall => error.BufferTooSmall,
+        error.ScratchTooSmall => blk: {
+            log.warn("getReportDescriptor: OpenOptions.descriptor_scratch was too small", .{});
+            break :blk error.BufferTooSmall;
+        },
+        error.Unsupported => error.Unsupported,
+    };
 }
 
 fn mapRead(result: std.Io.Operation.FileReadStreaming.Result) errors.ReadError!usize {

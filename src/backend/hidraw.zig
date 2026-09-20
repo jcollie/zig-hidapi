@@ -35,6 +35,10 @@ const BusType = @import("../bus_type.zig").BusType;
 /// The largest report descriptor either kernel will hand out.
 pub const max_report_descriptor_len = 4096;
 
+/// Zero: both kernels hand over the descriptor itself, so there is nothing to
+/// rebuild and nowhere to need working memory.
+pub const recommended_descriptor_scratch = 0;
+
 /// What `HIDIOCGRAWINFO` fills in, laid out as `struct hidraw_devinfo`.
 ///
 /// Identical on both systems. The kernels declare the vendor and product

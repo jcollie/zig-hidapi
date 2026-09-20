@@ -57,6 +57,10 @@ const log = std.log.scoped(.hidapi_darwin);
 /// The largest report descriptor this library will copy out.
 pub const max_report_descriptor_len = 4096;
 
+/// Zero: IOKit publishes the descriptor itself, so there is nothing to
+/// rebuild and nowhere to need working memory.
+pub const recommended_descriptor_scratch = 0;
+
 /// Map an `IOReturn` onto the portable error set, logging what it was.
 fn mapReturn(what: []const u8, rc: iokit.IOReturn) errors.DeviceError {
     log.warn("{s}: IOReturn 0x{x}", .{ what, @as(u32, @bitCast(rc)) });

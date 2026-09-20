@@ -75,6 +75,9 @@ test {
     // parsing, which is what decides whether a device is skipped.
     _ = @import("backend/windows/ioctl.zig");
     _ = @import("backend/windows/path.zig");
+    _ = @import("backend/windows/item.zig");
+    _ = @import("backend/windows/preparsed.zig");
+    _ = @import("backend/windows/reconstruct.zig");
     _ = @import("backend/darwin/naming.zig");
     _ = @import("backend/darwin/ReportQueue.zig");
 }

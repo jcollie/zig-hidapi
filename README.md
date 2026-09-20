@@ -63,14 +63,28 @@ what you want.
 
 Two Windows limitations are worth knowing before you rely on them:
 
-- **`getReportDescriptor` returns `error.Unsupported`.** The HID class driver
-  keeps only its own parsed form of the descriptor and does not serve the
-  original bytes to user mode at all. A descriptor can be *reconstructed* from
-  the parsed form — the C hidapi spends about a thousand lines doing it — but
-  the result is equivalent rather than identical, and this library would
-  rather say it cannot than hand back bytes the device never sent.
-  `Device.getPreparsedData` offers the parsed form to a caller who knows what
-  to do with it.
+- **`getReportDescriptor` rebuilds the descriptor rather than reading it.**
+  The HID class driver keeps only its own parsed form and never serves the
+  original bytes to user mode, so there is nothing to read. What comes back
+  describes the same device — same reports, same fields, same bit positions —
+  and is *not* byte-for-byte what the device sent, because the parsed form has
+  lost where the padding was and how the items were grouped. Do not compare
+  descriptors for equality across platforms.
+
+  Rebuilding needs working memory, and this library allocates none, so it
+  happens only for a device opened with `OpenOptions.descriptor_scratch`:
+
+  ```zig
+  var scratch: [hidapi.Device.recommended_descriptor_scratch]u8 = undefined;
+  try device.open(io, id, .{ .descriptor_scratch = &scratch });
+  ```
+
+  Without it — and on a device whose parsed form this library cannot read —
+  the answer is `error.Unsupported`, as before. `recommended_descriptor_scratch`
+  is zero on the other three backends, which read the descriptor directly, so
+  portable code can pass it everywhere and cost nothing.
+  `Device.getPreparsedData` still offers the parsed form to a caller who wants
+  it raw.
 - **Keyboards and pointing devices cannot be read.** The system holds them
   exclusively, so they open for metadata only: they enumerate and describe
   themselves perfectly well, and `read` and `write` report

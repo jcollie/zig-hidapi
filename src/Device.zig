@@ -63,6 +63,19 @@ pub const OpenOptions = struct {
     /// device being opened.
     input_queue: []u8 = &.{},
 
+    /// Working memory for rebuilding a report descriptor.
+    ///
+    /// Only Windows uses it, and only because Windows is the one system that
+    /// does not keep the descriptor a device sent: the HID class driver
+    /// parses it once and keeps its own form, so the descriptor has to be
+    /// rebuilt from that. Doing so needs somewhere to work, and this library
+    /// allocates nothing, so the somewhere is the caller's.
+    ///
+    /// Leave it empty and `getReportDescriptor` reports `error.Unsupported`
+    /// on Windows, exactly as it did before. Sixteen kilobytes is comfortable
+    /// for any device; see `Device.recommended_descriptor_scratch`.
+    descriptor_scratch: []u8 = &.{},
+
     /// Open the device exclusively, so that nothing else receives events from
     /// it while it is held.
     ///
@@ -209,12 +222,16 @@ pub fn getReportDescriptorLen(dev: *Device, io: std.Io) errors.DescriptorError!u
 /// Size `buf` with `getReportDescriptorLen`, or use
 /// `max_report_descriptor_len` to be sure it always fits.
 ///
-/// Returns `error.Unsupported` on Windows, where the HID class driver keeps
-/// only its own parsed form of the descriptor and does not serve the original
-/// bytes to user mode at all. There is no way around that short of
-/// reconstructing a descriptor from the parsed form, which produces something
-/// equivalent but not identical, and this library would rather say it cannot
-/// than hand back bytes the device never sent.
+/// On Windows this is **rebuilt** rather than read, because the HID class
+/// driver does not keep the bytes the device sent. What comes back describes
+/// the same device -- same reports, same fields, same bit positions -- and is
+/// not byte-for-byte what the device sent, because the parsed form has lost
+/// where the padding was and how the items were grouped. Do not compare two
+/// descriptors for equality across platforms.
+///
+/// Rebuilding needs working memory, so it happens only when the device was
+/// opened with `OpenOptions.descriptor_scratch`; without it the answer is
+/// `error.Unsupported`, as it is for a blob this library cannot read.
 pub fn getReportDescriptor(
     dev: *Device,
     io: std.Io,
@@ -241,6 +258,12 @@ pub fn takeDroppedReports(dev: *Device) u64 {
 /// The largest report descriptor any device reports, so a buffer this size
 /// always holds one.
 pub const max_report_descriptor_len = backend.impl.max_report_descriptor_len;
+
+/// A comfortable size for `OpenOptions.descriptor_scratch`.
+///
+/// Zero on every backend but Windows, which is the only one that has to
+/// rebuild a descriptor rather than read it.
+pub const recommended_descriptor_scratch = backend.impl.recommended_descriptor_scratch;
 
 /// Fill `out` with what the open device says about itself.
 ///
@@ -275,6 +298,7 @@ test "read-only operations against attached devices" {
     defer devices.deinit(io);
 
     var descriptor: [max_report_descriptor_len]u8 = undefined;
+    var descriptor_scratch: [recommended_descriptor_scratch]u8 = undefined;
     var checked: usize = 0;
 
     while (try devices.next(io)) |listed| {
@@ -282,7 +306,10 @@ test "read-only operations against attached devices" {
         // Enumeration needs no permission and opening does, so most devices
         // on an unprivileged run are listed and then refused. That is the
         // point of the split, and not a reason to fail the test.
-        dev.open(io, listed.id, .{}) catch continue;
+        //
+        // The scratch is what lets Windows rebuild a descriptor; the other
+        // three ignore it.
+        dev.open(io, listed.id, .{ .descriptor_scratch = &descriptor_scratch }) catch continue;
         defer dev.close(io);
 
         // Only side-effect-free calls belong here, because this runs against
@@ -301,9 +328,9 @@ test "read-only operations against attached devices" {
         try std.testing.expectEqual(listed.product_id, opened.product_id);
         try std.testing.expectEqual(listed.native_bus, opened.native_bus);
 
-        // Windows has no report descriptor to give -- the class driver keeps
-        // only its own parsed form -- so `Unsupported` is a correct answer
-        // here rather than a failure, and the two calls have to agree about
+        // A device that cannot produce a descriptor at all -- on Windows,
+        // one whose preparsed data this library cannot read -- is a correct
+        // answer rather than a failure, but the two calls have to agree about
         // which answer they are giving.
         if (dev.getReportDescriptorLen(io)) |len| {
             try std.testing.expect(len <= max_report_descriptor_len);
@@ -316,6 +343,18 @@ test "read-only operations against attached devices" {
                 error.BufferTooSmall,
                 dev.getReportDescriptor(io, descriptor[0 .. len - 1]),
             );
+
+            // Whatever the descriptor came from -- read from the kernel, or
+            // rebuilt from Windows' parsed form -- it has to describe the
+            // device the system said this was. On Windows this is the only
+            // check the reconstruction gets against real hardware, since the
+            // bytes the device actually sent are gone.
+            if (@import("descriptor.zig").firstUsage(bytes)) |usage| {
+                if (listed.usage_page != 0) {
+                    try std.testing.expectEqual(listed.usage_page, usage.page);
+                    try std.testing.expectEqual(listed.usage, usage.id);
+                }
+            }
         } else |err| switch (err) {
             error.Unsupported => try std.testing.expectError(
                 error.Unsupported,

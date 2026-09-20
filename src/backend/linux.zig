@@ -32,6 +32,9 @@ const Str = @import("../Str.zig");
 /// size always fits one.
 pub const max_report_descriptor_len = hidraw.max_report_descriptor_len;
 
+/// Zero; see `hidraw.recommended_descriptor_scratch`.
+pub const recommended_descriptor_scratch = hidraw.recommended_descriptor_scratch;
+
 /// Linux's request numbers, from `uapi/linux/hidraw.h`.
 ///
 /// The fixed ones come out of `std.os.linux.IOCTL`; the ones carrying a

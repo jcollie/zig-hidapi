@@ -23,6 +23,7 @@ pub const required = [_][]const u8{
     "Device",
     "Enumerator",
     "max_report_descriptor_len",
+    "recommended_descriptor_scratch",
 };
 
 /// The methods `Device` forwards to.
