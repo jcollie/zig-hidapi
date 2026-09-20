@@ -12,16 +12,17 @@
 //! backend cancelable, and puts reads on the same APC-based path
 //! `Io.Threaded` uses for any other asynchronous handle.
 //!
-//! Two things genuinely need `hid.dll`, and they are the exceptions rather
-//! than the rule:
+//! The only thing left that needs `hid.dll` is the three device strings, and
+//! that is on the strength of Microsoft's documentation rather than of
+//! anything measured -- see `string` below.
 //!
-//! * **The three report lengths.** Windows rejects any `WriteFile` that is not
-//!   exactly `OutputReportByteLength` bytes, and the only supported way to
-//!   learn that number is `HidD_GetPreparsedData` followed by
-//!   `HidP_GetCaps`. `HidP_*` is pure user-mode parsing with no request behind
-//!   it, so there is no control code to use instead. It is called once at
-//!   open.
-//! * **The usage page and usage**, which come out of the same `HIDP_CAPS`.
+//! The report lengths and the usage pair used to go through
+//! `HidD_GetPreparsedData` and `HidP_GetCaps` as well, and no longer do,
+//! because that call fails on a handle opened with no access -- which is how
+//! every device the system holds exclusively gets opened. A keyboard, a mouse
+//! or a tablet came back reporting usage `0000:0000` and no report lengths,
+//! while the control code on the very same handle answered perfectly well.
+//! They now come straight out of the preparsed blob's header.
 //!
 //! **Windows cannot produce a report descriptor.**
 //! `IOCTL_HID_GET_REPORT_DESCRIPTOR` exists but lives in `hidport.h`: it is
@@ -52,6 +53,7 @@ const foundation = win32.foundation;
 
 const ioctl = @import("windows/ioctl.zig");
 const path_util = @import("windows/path.zig");
+const preparsed = @import("windows/preparsed.zig");
 const reconstruct = @import("windows/reconstruct.zig");
 
 const descriptor = @import("../descriptor.zig");
@@ -182,7 +184,7 @@ pub const Device = struct {
             .readable = readable,
         };
 
-        self.readCaps();
+        self.readCaps(io);
 
         // HIDCLASS keeps a ring of input reports per open handle and defaults
         // to 32, which a chatty device overruns between reads. The C hidapi
@@ -194,27 +196,29 @@ pub const Device = struct {
     /// Read the three report lengths and the usage pair out of the class
     /// driver's parsed data.
     ///
-    /// The one place this backend calls `hid.dll`. `HidP_GetCaps` parses a
-    /// blob that is already in memory -- there is no request behind it and so
-    /// no control code to use instead -- and without the output report length
-    /// a write cannot be padded to the length Windows insists on.
+    /// Straight out of the blob's header rather than through
+    /// `HidD_GetPreparsedData` and `HidP_GetCaps`, and that is not a
+    /// preference. `HidD_GetPreparsedData` fails on a handle opened with no
+    /// access, which is how every device the system holds exclusively gets
+    /// opened -- so going through it left a keyboard, a mouse or a tablet
+    /// reporting usage `0000:0000` and no report lengths, while
+    /// `IOCTL_HID_GET_COLLECTION_DESCRIPTOR` on the very same handle answers
+    /// perfectly well. It also means this backend needs `hid.dll` for nothing
+    /// but the three device strings.
     ///
     /// Failure is not fatal. A device that will not say leaves the lengths at
     /// zero, and `write` then requires the caller to supply an exactly sized
     /// report rather than guessing one.
-    fn readCaps(self: *Device) void {
-        var preparsed: isize = 0;
-        if (hid.HidD_GetPreparsedData(self.file.handle, &preparsed) == 0) return;
-        defer _ = hid.HidD_FreePreparsedData(preparsed);
+    fn readCaps(self: *Device, io: std.Io) void {
+        var blob_buf: [max_report_descriptor_len]u8 = undefined;
+        const blob = self.getPreparsedData(io, &blob_buf) catch return;
+        const pp = preparsed.PreparsedData.init(blob) catch return;
 
-        var caps: hid_types.HIDP_CAPS = undefined;
-        if (hid.HidP_GetCaps(preparsed, &caps) != .SUCCESS) return;
-
-        self.input_report_len = caps.InputReportByteLength;
-        self.output_report_len = caps.OutputReportByteLength;
-        self.feature_report_len = caps.FeatureReportByteLength;
-        self.usage_page = caps.UsagePage;
-        self.usage = caps.Usage;
+        self.usage_page = pp.header.usage_page;
+        self.usage = pp.header.usage;
+        self.input_report_len = pp.header.caps_info[0].report_byte_length;
+        self.output_report_len = pp.header.caps_info[1].report_byte_length;
+        self.feature_report_len = pp.header.caps_info[2].report_byte_length;
     }
 
     pub fn close(self: *Device, io: std.Io) void {

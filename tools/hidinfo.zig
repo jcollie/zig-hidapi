@@ -152,7 +152,13 @@ fn describe(w: *std.Io.Writer, info: *const hidapi.DeviceInfo) !void {
             info.release_number & 0xff,
         });
     }
-    if (info.physical_location.slice()) |where| try w.print("  location       {s}\n", .{where});
+    if (info.physical_location.slice()) |where| {
+        // On Windows the physical location *is* the interface path, which is
+        // already printed as the id, and repeating it gains nothing.
+        if (!std.mem.eql(u8, where, info.id.slice())) {
+            try w.print("  location       {s}\n", .{where});
+        }
+    }
 }
 
 /// Open the device and say what its reports contain.

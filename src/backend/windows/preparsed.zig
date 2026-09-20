@@ -329,8 +329,26 @@ test "a well formed empty blob reads as empty" {
 
     const pp = try PreparsedData.init(&bytes);
     try std.testing.expectEqual(@as(u16, 0x01), pp.header.usage_page);
+    try std.testing.expectEqual(@as(u16, 0x02), pp.header.usage);
     try std.testing.expectEqual(@as(usize, 0), pp.caps(0).len);
     try std.testing.expectEqual(@as(usize, 0), pp.linkCollectionNodes().len);
+}
+
+test "the report lengths come out of the header" {
+    // What `Device.readCaps` reads, and the reason it no longer goes through
+    // `HidD_GetPreparsedData`: these are here, in a blob a zero-access handle
+    // can fetch.
+    var bytes: [@sizeOf(Header)]u8 align(4) = @splat(0);
+    const header: *Header = @ptrCast(&bytes);
+    @memcpy(&header.magic_key, magic);
+    header.caps_info[0].report_byte_length = 9; // input
+    header.caps_info[1].report_byte_length = 2; // output
+    header.caps_info[2].report_byte_length = 33; // feature
+
+    const pp = try PreparsedData.init(&bytes);
+    try std.testing.expectEqual(@as(u16, 9), pp.header.caps_info[0].report_byte_length);
+    try std.testing.expectEqual(@as(u16, 2), pp.header.caps_info[1].report_byte_length);
+    try std.testing.expectEqual(@as(u16, 33), pp.header.caps_info[2].report_byte_length);
 }
 
 test "an array that runs past the end of the blob is refused" {
