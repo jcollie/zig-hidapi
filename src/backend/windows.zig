@@ -467,12 +467,17 @@ pub const Device = struct {
     /// One of the three device strings, converted from UTF-16.
     ///
     /// These are the one place this backend uses the documented `HidD_*`
-    /// functions rather than the control code behind them, and the reason is
-    /// evidence rather than principle: issuing `IOCTL_HID_GET_*_STRING`
-    /// directly on a handle answers `STATUS_NOT_SUPPORTED`, which is what
-    /// Microsoft's own pages quietly imply when they say those requests are
-    /// for kernel-mode drivers and that user-mode applications call
-    /// `HidD_GetManufacturerString` and friends.
+    /// functions rather than the control code behind them, on the grounds
+    /// that Microsoft's pages say those requests are for kernel-mode drivers
+    /// and that user-mode applications call `HidD_GetManufacturerString` and
+    /// friends.
+    ///
+    /// Worth being precise about the evidence, because I first wrote down
+    /// more than there was: the control codes answered `NOT_SUPPORTED` on the
+    /// CI runner's devices, and so, it turns out, do these. Those devices
+    /// simply report no strings, so that run distinguished nothing. What is
+    /// left is the documentation, which is reason enough when the documented
+    /// call costs nothing.
     ///
     /// Nothing is lost by it. The argument for the control codes is that they
     /// go through `Io` and so can be cancelled and timed out, which matters
