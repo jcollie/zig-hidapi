@@ -51,3 +51,59 @@ jobs:
 
       - name: Build for every supported target
         run: zig build check --summary all
+
+  freebsd:
+    # The last platform nobody had run. There is no hosted FreeBSD runner, so
+    # this boots one in qemu on an Ubuntu runner.
+    #
+    # Zig is never installed in the guest. It cross-compiles and *links* a
+    # FreeBSD executable from Linux perfectly well -- unlike Darwin, no SDK is
+    # involved -- so the binaries are built on the host, and the VM only has
+    # to run them. That keeps the guest's job to about ten seconds of work and
+    # avoids depending on whatever Zig FreeBSD's ports happen to carry.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+
+      # `-Dcheck-windows=false` because the Windows half of `check` would
+      # fetch the Win32 bindings, and nothing here is going to compile them.
+      - name: Cross-build for FreeBSD
+        run: |
+          zig build install test-exe \
+            -Dtarget=x86_64-freebsd \
+            -Doptimize=ReleaseSafe \
+            -Dcheck-windows=false
+          file zig-out/bin/unit-tests
+
+      - name: Run in FreeBSD
+        uses: vmactions/freebsd-vm@4469451fe39bee80be4066836c5170362e9349f3 # v1.5.7
+        with:
+          # The working directory in the guest is the same as on the host, so
+          # the binaries built above are simply there.
+          run: |
+            set -e
+            uname -a
+
+            # `hidraw` needs the new HID stack. It is in GENERIC and enabled by
+            # default from 14.2, so this is belt and braces for an older image;
+            # a module that is already in the kernel fails to load and that is
+            # not a problem.
+            kldload hid hidbus hidraw usbhid 2>/dev/null || true
+            echo "--- device nodes ---"
+            ls -l /dev/hidraw* 2>/dev/null || echo "(no hidraw nodes)"
+
+            echo "--- unit tests ---"
+            ./zig-out/bin/unit-tests
+
+            # Exercises the real thing: opening /dev, walking it, and opening
+            # and describing whatever is attached. A machine with no HID
+            # devices still proves the enumeration path runs on a FreeBSD
+            # kernel, which nothing before this did.
+            echo "--- hidinfo ---"
+            ./zig-out/bin/hidinfo
