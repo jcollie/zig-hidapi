@@ -8,11 +8,18 @@
     nixpkgs = {
       url = "https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.zst";
     };
+    # Mine, and not the `zon2nix` in nixpkgs, which is a different program
+    # taking different options.
+    zon2nix = {
+      url = "git+https://git.jcollie.dev/jeff/zon2nix.git?ref=refs/tags/v0.7.3";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
     {
       nixpkgs,
+      zon2nix,
       ...
     }:
     let
@@ -44,6 +51,10 @@
         rec {
           tests = pkgs.callPackage ./package.nix { };
           default = tests;
+          # The Zig dependencies on their own, so that a job needing them for
+          # something other than the package -- `zig build check`, say -- can
+          # realise them without building it.
+          zig-deps = pkgs.callPackage ./build.zig.zon.nix { };
         }
       );
 
@@ -75,6 +86,19 @@
               pkgs.radicle-node
               pkgs.reuse
               pkgs.typos
+              # Wrapped so the Zig it shells out to for `zig env` is the one
+              # this project builds with, rather than whatever is on the
+              # caller's PATH. Regenerate `build.zig.zon.nix` with:
+              #   zon2nix --16 --nix=build.zig.zon.nix build.zig.zon
+              (pkgs.symlinkJoin {
+                name = "zon2nix";
+                paths = [ zon2nix.packages.${pkgs.stdenv.hostPlatform.system}.zon2nix ];
+                nativeBuildInputs = [ pkgs.makeWrapper ];
+                postBuild = ''
+                  wrapProgram $out/bin/zon2nix \
+                    --prefix PATH : ${lib.makeBinPath [ pkgs.zig_0_16 ]}
+                '';
+              })
               pkgs.zig_0_16
             ];
           };

@@ -550,7 +550,20 @@ zig build docs-serve  # ...and serve it at http://127.0.0.1:8000/
 ```
 
 `check` compiles the library as an object for each supported target and two
-architectures apiece. Building an object rather than linking one is what lets
+architectures apiece. The Windows targets need the generated Win32 bindings,
+which is the project's only dependency; `nix build .#zig-deps` produces them
+as a directory and `zig build --system <that>` hands it over and forbids
+fetching, which is how CI compiles them with no network.
+
+`build.zig.zon.nix` is generated from `build.zig.zon` and committed. Adding,
+removing or updating a dependency means regenerating it:
+
+```sh
+nix develop -c zon2nix --16 --nix=build.zig.zon.nix build.zig.zon
+```
+
+Mind that the output flags name the file to *write*: `zon2nix --txt
+build.zig.zon` replaces the manifest with a list of URLs. Building an object rather than linking one is what lets
 a Linux machine compile a backend it could never link — no framework, import
 library or platform SDK has to be present — so it is the cheap way to keep
 every backend honest from one workstation. What it cannot prove is that the

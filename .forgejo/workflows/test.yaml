@@ -65,7 +65,9 @@ jobs:
       - name: Test
         run: |
           nix develop -c zig version
-          nix develop -c zig build test -Doptimize=${{ matrix.optimize }} --summary all
+          nix develop -c zig build test --summary all \
+            -Doptimize=${{ matrix.optimize }} \
+            --system "$(nix build --print-out-paths .#zig-deps)"
 
       # `zig-pkg` is where Zig materialises a fetched dependency, so once
       # anything has built for Windows it holds 64 MB of generated Win32
@@ -85,8 +87,13 @@ jobs:
       - name: Check out
         uses: https://code.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # `--system` hands Zig the dependency farm Nix built and forbids
+      # fetching, so the Windows targets -- the only ones with a dependency --
+      # compile without the job reaching the network.
       - name: Compile for every supported target
-        run: nix develop -c zig build check --summary all
+        run: >
+          nix develop -c zig build check --summary all
+          --system "$(nix build --print-out-paths .#zig-deps)"
 
   vm:
     # The only job that proves anything about behaviour rather than about

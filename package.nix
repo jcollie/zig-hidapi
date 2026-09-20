@@ -14,8 +14,14 @@
 {
   lib,
   stdenv,
+  callPackage,
   zig_0_16,
 }:
+let
+  # Generated from build.zig.zon by zon2nix; regenerate with
+  #   nix develop -c zon2nix --16 --nix=build.zig.zon.nix build.zig.zon
+  zigDeps = callPackage ./build.zig.zon.nix { };
+in
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "zig-hidapi-tests";
@@ -26,6 +32,7 @@ stdenv.mkDerivation (finalAttrs: {
     fileset = lib.fileset.unions [
       ./build.zig
       ./build.zig.zon
+      ./build.zig.zon.nix
       ./src
       ./tests
       ./tools
@@ -35,15 +42,17 @@ stdenv.mkDerivation (finalAttrs: {
   nativeBuildInputs = [ zig_0_16 ];
 
   # `test-exe` installs the test binaries; the default step would install
-  # nothing, since the library produces no artifact.
+  # nothing beyond `hidinfo`, and the virtual machine test wants the tests.
   #
-  # `-Dcheck-windows=false` keeps the build script from constructing the
-  # Windows half of `zig build check`, which would ask for the generated Win32
-  # bindings and so try to fetch them. There is no network here, and nothing
-  # in a Linux virtual machine test wants a Windows object anyway.
+  # `--system` hands Zig the dependency farm and, more to the point, forbids
+  # fetching outright: a dependency missing from it is an error naming the
+  # package rather than a silent attempt to reach a network that is not
+  # there.
   zigBuildFlags = [
+    "install"
     "test-exe"
-    "-Dcheck-windows=false"
+    "--system"
+    "${zigDeps}"
   ];
 
   # The tests are the product, so running them here would be running them
