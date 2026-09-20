@@ -62,6 +62,39 @@ pub fn build(b: *std.Build) void {
         test_exe_step.dependOn(&b.addInstallArtifact(virtual_device_tests, .{}).step);
     }
 
+    // The one program this package ships: `lsusb -v` for HID, and the
+    // library's own worked example. Everything it does is something a
+    // dependent will want to do, so if anything in it is awkward that is a
+    // fault in the library rather than in the program.
+    const hidinfo = b.addExecutable(
+        .{
+            .name = "hidinfo",
+            .root_module = b.createModule(
+                .{
+                    .root_source_file = b.path("tools/hidinfo.zig"),
+                    .target = target,
+                    .optimize = optimize,
+                    .imports = &.{
+                        .{ .name = "hidapi", .module = module },
+                    },
+                },
+            ),
+        },
+    );
+    b.installArtifact(hidinfo);
+
+    const run_hidinfo = b.addRunArtifact(hidinfo);
+    run_hidinfo.step.dependOn(b.getInstallStep());
+    if (b.args) |args| run_hidinfo.addArgs(args);
+    const run_step = b.step("run", "Build and run hidinfo");
+    run_step.dependOn(&run_hidinfo.step);
+
+    // It has tests of its own -- the argument parsing and the usage names --
+    // and without this they would never run.
+    test_step.dependOn(&b.addRunArtifact(
+        b.addTest(.{ .root_module = hidinfo.root_module }),
+    ).step);
+
     const docs_obj = b.addObject(
         .{
             .name = "hidapi",
@@ -286,6 +319,19 @@ fn addCheckStep(
         check_step.dependOn(&b.addObject(.{
             .name = b.fmt("hidapi-{t}-{t}", .{ query.cpu_arch.?, query.os_tag.? }),
             .root_module = root,
+        }).step);
+
+        // And the one program this package ships, which is otherwise only
+        // ever built for whatever machine is doing the building.
+        const cli = b.createModule(.{
+            .root_source_file = b.path("tools/hidinfo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "hidapi", .module = module }},
+        });
+        check_step.dependOn(&b.addObject(.{
+            .name = b.fmt("hidinfo-{t}-{t}", .{ query.cpu_arch.?, query.os_tag.? }),
+            .root_module = cli,
         }).step);
     }
 

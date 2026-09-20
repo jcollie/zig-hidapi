@@ -107,6 +107,36 @@ to open each node to learn anything about it, and an unprivileged process
 without a `devfs.rules` entry therefore sees **nothing** where the same process
 on Linux would see everything and merely be unable to open it.
 
+## hidinfo
+
+The package ships one program: `lsusb -v` for HID.
+
+```console
+$ zig build run -- --vendor 046d
+046d:c090 [USB] Logitech G703 LIGHTSPEED Wireless Gaming Mouse w/ HERO (49D858E2)
+  id             /dev/hidraw4
+  bus            USB
+  usage          0001:0002  (Mouse)
+  interface      0
+  release        22.02
+  location       usb-0000:0b:00.3-2.3/input0
+  descriptor     67 bytes
+  input report
+       0..15   16x1   [Data,Var,Abs] 0..1  usage 0009:0001..0010  (Button)
+      16..47    2x16  [Data,Var,Rel] -32767..32767  usage 0001:0030 0001:0031  (X)
+      48..55    1x8   [Data,Var,Rel] -127..127  usage 0001:0038  (Wheel)
+      56..63    1x8   [Data,Var,Rel] -127..127  usage 000c:0238  (AC Pan)
+```
+
+`--short` gives a line per device and opens nothing, `--raw` adds a hex dump of
+the descriptor, and `--vendor`, `--product` and `--usage` narrow the list.
+Enumeration needs no permissions, so the listing is always complete; a device
+this process may not open says so and the rest carry on.
+
+It is also the library's worked example — everything it does is something a
+dependent will want to do — so `tools/hidinfo.zig` is the place to look for how
+the pieces fit together.
+
 ## Installation
 
 Fetch the package into your `build.zig.zon`:
@@ -511,7 +541,8 @@ nix develop
 Build and test:
 
 ```sh
-zig build
+zig build              # hidinfo into zig-out/bin
+zig build run -- -h    # ...and run it
 zig build test
 zig build check       # compile for every supported target, without linking
 zig build docs        # API reference into zig-out/docs
