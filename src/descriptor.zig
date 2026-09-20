@@ -18,7 +18,8 @@
 //!   exactly as written.
 //! * `Parser` runs the item state machine and yields a `Field` per main item,
 //!   with its bit position, its size, its usages and its ranges all resolved.
-//!   `Field.extract` then reads one out of a report.
+//!   `Field.extract` then reads one out of a report and `Field.insert` writes
+//!   one into it.
 //!
 //! Nothing here allocates. `Parser` is a value the caller owns, about two
 //! kilobytes, and the slices a `Field` hands back point into it and stay valid
@@ -377,6 +378,81 @@ pub const Field = struct {
                 break :blk if (index < list.len) list[index] else list[list.len - 1];
             },
         };
+    }
+
+    /// Whether element `index` fits inside a report body of `len` bytes.
+    pub fn fits(self: Field, len: usize, index: u16) bool {
+        if (index >= self.count) return false;
+        if (self.bit_size == 0 or self.bit_size > 32) return false;
+        const start = self.bit_offset + @as(u32, self.bit_size) * index;
+        return start + self.bit_size <= len * 8;
+    }
+
+    /// Whether this field's values are signed.
+    ///
+    /// A negative logical minimum is the only thing that says so. The bits
+    /// cannot: the same eight bits are 200 or -56 depending only on what the
+    /// descriptor said about them.
+    pub fn isSigned(self: Field) bool {
+        return self.logical_min < 0;
+    }
+
+    pub const InsertError = error{
+        /// The field does not fit in the body given, which is what a report
+        /// buffer too short for the device looks like.
+        DoesNotFit,
+        /// The value will not fit the field's width, or falls outside the
+        /// logical range the descriptor declared.
+        OutOfRange,
+    };
+
+    /// Write `value` into element `index` of a report body.
+    ///
+    /// The counterpart of `extract`, and takes the body the same way: without
+    /// any leading report ID byte. Only the field's own bits are touched, so
+    /// several fields can be written into one report in any order, and the
+    /// bits between them are left as the caller left them.
+    ///
+    /// Refuses a value that will not fit rather than truncating it, and a
+    /// value outside the declared logical range rather than clamping it.
+    /// Silently writing something other than what was asked for is how a
+    /// device ends up doing something other than what was meant, and the
+    /// caller is better placed to decide what to do about it.
+    pub fn insert(self: Field, body: []u8, index: u16, value: i64) InsertError!void {
+        if (!self.fits(body.len, index)) return error.DoesNotFit;
+
+        // A range of zero to zero is an undeclared range rather than a field
+        // that may only hold zero -- padding has one, and so do plenty of
+        // vendor descriptors -- so it is not enforced.
+        if (self.logical_min != self.logical_max) {
+            if (value < self.logical_min or value > self.logical_max) return error.OutOfRange;
+        }
+
+        // And whatever the descriptor claims, the value has to fit the bits
+        // there are.
+        if (self.isSigned()) {
+            const limit = @as(i64, 1) << @intCast(self.bit_size - 1);
+            if (value < -limit or value > limit - 1) return error.OutOfRange;
+        } else {
+            if (value < 0) return error.OutOfRange;
+            if (self.bit_size < 63 and value >= @as(i64, 1) << @intCast(self.bit_size)) {
+                return error.OutOfRange;
+            }
+        }
+
+        const start = self.bit_offset + @as(u32, self.bit_size) * index;
+        const raw: u64 = @bitCast(value);
+        var written: u16 = 0;
+        while (written < self.bit_size) : (written += 1) {
+            const bit = start + written;
+            const mask = @as(u8, 1) << @intCast(bit % 8);
+            const set = (raw >> @intCast(written)) & 1 != 0;
+            if (set) {
+                body[bit / 8] |= mask;
+            } else {
+                body[bit / 8] &= ~mask;
+            }
+        }
     }
 
     /// Read element `index` out of a report body.
@@ -1119,4 +1195,185 @@ test "a long item is stepped over" {
     const field = (try parser.next()).?;
     try std.testing.expectEqual(@as(u16, 8), field.bit_size);
     try std.testing.expect(try parser.next() == null);
+}
+
+test "a value written is the value read back" {
+    // The property that matters: for every width, signed and unsigned, at an
+    // offset that is not byte aligned, insert and extract have to agree.
+    var body: [16]u8 = undefined;
+
+    for ([_]bool{ false, true }) |signed| {
+        var size: u16 = 1;
+        while (size <= 32) : (size += 1) {
+            // Skip the one-bit signed case, which can only hold 0 and -1 and
+            // is not a thing a descriptor declares.
+            if (signed and size == 1) continue;
+
+            const limit: i64 = @as(i64, 1) << @intCast(size - 1);
+            const field: Field = .{
+                .report_id = 0,
+                .kind = .output,
+                // Deliberately not byte aligned.
+                .bit_offset = 3,
+                .bit_size = size,
+                .count = 2,
+                .usage_page = 0,
+                .usages = .none,
+                // Signed fields declare their range; unsigned ones here
+                // leave it undeclared, so the only bound is the width. A
+                // descriptor cannot state the maximum of a 32 bit unsigned
+                // field anyway -- logical values are signed 32 bit.
+                .logical_min = if (signed) @intCast(-limit) else 0,
+                .logical_max = if (signed) @intCast(limit - 1) else 0,
+                .physical_min = 0,
+                .physical_max = 0,
+                .unit = 0,
+                .unit_exponent = 0,
+                .flags = .{ .variable = true },
+                .collections = &.{},
+            };
+
+            const unsigned_max: i64 = (@as(i64, 1) << @intCast(size)) - 1;
+            const values = [_]i64{
+                0,
+                1,
+                if (signed) -1 else 1,
+                if (signed) -limit else 0,
+                if (signed) limit - 1 else unsigned_max,
+            };
+            for (values) |value| {
+                @memset(&body, 0xA5);
+                try field.insert(&body, 0, value);
+                try std.testing.expectEqual(@as(?i64, value), field.extract(&body, 0));
+
+                // And the second element, so that the index arithmetic is
+                // checked rather than assumed.
+                try field.insert(&body, 1, value);
+                try std.testing.expectEqual(@as(?i64, value), field.extract(&body, 1));
+                // Writing the second must not have disturbed the first.
+                try std.testing.expectEqual(@as(?i64, value), field.extract(&body, 0));
+            }
+        }
+    }
+}
+
+test "writing a field leaves every other bit alone" {
+    // Four bits at offset 2, written into a body that is otherwise all ones.
+    const field: Field = .{
+        .report_id = 0,
+        .kind = .output,
+        .bit_offset = 2,
+        .bit_size = 4,
+        .count = 1,
+        .usage_page = 0,
+        .usages = .none,
+        .logical_min = 0,
+        .logical_max = 15,
+        .physical_min = 0,
+        .physical_max = 0,
+        .unit = 0,
+        .unit_exponent = 0,
+        .flags = .{ .variable = true },
+        .collections = &.{},
+    };
+
+    var body = [_]u8{ 0xFF, 0xFF };
+    try field.insert(&body, 0, 0b0101);
+    // Bits 2..5 become 0101; bits 0, 1, 6 and 7 stay set.
+    try std.testing.expectEqual(@as(u8, 0b1101_0111), body[0]);
+    try std.testing.expectEqual(@as(u8, 0xFF), body[1]);
+
+    // Zeroes have to be written as well as ones, or a field can only ever
+    // gain bits.
+    try field.insert(&body, 0, 0);
+    try std.testing.expectEqual(@as(u8, 0b1100_0011), body[0]);
+}
+
+test "a value that will not fit is refused rather than truncated" {
+    const field: Field = .{
+        .report_id = 0,
+        .kind = .output,
+        .bit_offset = 0,
+        .bit_size = 8,
+        .count = 1,
+        .usage_page = 0,
+        .usages = .none,
+        .logical_min = 0,
+        .logical_max = 100,
+        .physical_min = 0,
+        .physical_max = 0,
+        .unit = 0,
+        .unit_exponent = 0,
+        .flags = .{ .variable = true },
+        .collections = &.{},
+    };
+
+    var body = [_]u8{0};
+    // Outside the declared logical range, though it would fit the bits.
+    try std.testing.expectError(error.OutOfRange, field.insert(&body, 0, 200));
+    try std.testing.expectError(error.OutOfRange, field.insert(&body, 0, -1));
+    // Past the end of the item.
+    try std.testing.expectError(error.DoesNotFit, field.insert(&body, 1, 0));
+    // A body too short for the field.
+    try std.testing.expectError(error.DoesNotFit, field.insert(body[0..0], 0, 0));
+    // Nothing was written by any of those.
+    try std.testing.expectEqual(@as(u8, 0), body[0]);
+
+    try field.insert(&body, 0, 100);
+    try std.testing.expectEqual(@as(u8, 100), body[0]);
+}
+
+test "a field wider than its declared range is still bounded by its bits" {
+    // An undeclared logical range -- zero to zero -- is not enforced, but the
+    // width always is, or the write would run into the next field.
+    const field: Field = .{
+        .report_id = 0,
+        .kind = .output,
+        .bit_offset = 0,
+        .bit_size = 4,
+        .count = 1,
+        .usage_page = 0,
+        .usages = .none,
+        .logical_min = 0,
+        .logical_max = 0,
+        .physical_min = 0,
+        .physical_max = 0,
+        .unit = 0,
+        .unit_exponent = 0,
+        .flags = .{ .variable = true },
+        .collections = &.{},
+    };
+
+    var body = [_]u8{0};
+    try field.insert(&body, 0, 15);
+    try std.testing.expectEqual(@as(u8, 15), body[0]);
+    try std.testing.expectError(error.OutOfRange, field.insert(&body, 0, 16));
+}
+
+test "a whole output report is assembled from its fields" {
+    // The keyboard's LED report: five one-bit LEDs and three bits of padding,
+    // which is exactly the shape of thing this is for.
+    var parser: Parser = .init(&keyboard_descriptor);
+    var leds: ?Field = null;
+    while (try parser.next()) |field| {
+        if (field.kind == .output and !field.flags.constant) {
+            leds = field;
+            break;
+        }
+    }
+    const field = leds.?;
+    try std.testing.expectEqual(@as(u16, 5), field.count);
+    try std.testing.expectEqual(@as(u16, 1), field.bit_size);
+
+    const len = try reportLength(&keyboard_descriptor, .output, 0);
+    try std.testing.expectEqual(@as(usize, 1), len);
+
+    var report = [_]u8{0} ** 1;
+    // Num Lock is usage 1, so element zero; Caps Lock is usage 2, element one.
+    try field.insert(&report, 0, 1);
+    try field.insert(&report, 2, 1);
+    try std.testing.expectEqual(@as(u8, 0b0000_0101), report[0]);
+
+    try std.testing.expectEqual(@as(?u32, 0x0008_0001), field.usageAt(0));
+    try std.testing.expectEqual(@as(?u32, 0x0008_0003), field.usageAt(2));
 }

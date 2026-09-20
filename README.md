@@ -302,6 +302,23 @@ ID byte, so pass `report[1..]` for a device that uses them.
 `descriptor.reportLength` gives the length of a report, counting the ID byte
 where there is one.
 
+Reports are built the same way round. `insert(body, index, value)` writes one
+element and touches only that field's bits, so several fields go into one
+report in any order:
+
+```zig
+var report: [1]u8 = @splat(0);
+try leds.insert(&report, 0, 1); // Num Lock on
+try leds.insert(&report, 2, 1); // Scroll Lock on
+_ = try device.write(io, &report);
+```
+
+It refuses a value that will not fit the field rather than truncating it, and
+one outside the declared logical range rather than clamping it — silently
+writing something other than what was asked is how a device ends up doing
+something other than what was meant. A range of zero to zero means the
+descriptor declared none, and then only the field's width bounds the value.
+
 There are two cheaper levels for code that wants less. `descriptor.firstUsage`
 answers only what the device is, which is what enumeration uses to fill in
 `usage_page` and `usage`. `descriptor.Iterator` walks the raw items for code
