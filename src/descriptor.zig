@@ -233,7 +233,7 @@ pub const Iterator = struct {
         if (start + size > self.bytes.len) return null;
         self.index = start + size;
         return .{
-            .type = @enumFromInt(@as(u2, @truncate(prefix >> 2))),
+            .type = @fromBackingInt(@as(u2, @truncate(prefix >> 2))),
             .tag = @truncate(prefix >> 4),
             .data = self.bytes[start..][0..size],
         };
@@ -640,7 +640,7 @@ pub const Parser = struct {
                 // A collection's usage is the first one declared for it.
                 const usage = self.firstLocalUsage();
                 self.collections[self.collection_depth] = .{
-                    .type = @enumFromInt(@as(u8, @truncate(raw.unsigned()))),
+                    .type = @fromBackingInt(@as(u8, @truncate(raw.unsigned()))),
                     .usage_page = @truncate(usage >> 16),
                     .usage = @truncate(usage),
                 };
@@ -665,9 +665,9 @@ pub const Parser = struct {
         };
 
         const slot = try self.reportSlot(self.globals.report_id);
-        const bit_offset = self.offsets[slot][@intFromEnum(kind)];
+        const bit_offset = self.offsets[slot][@backingInt(kind)];
         const total = @as(u32, self.globals.report_size) * self.globals.report_count;
-        self.offsets[slot][@intFromEnum(kind)] = bit_offset + total;
+        self.offsets[slot][@backingInt(kind)] = bit_offset + total;
 
         return .{
             .report_id = self.globals.report_id,
@@ -1368,7 +1368,7 @@ test "a whole output report is assembled from its fields" {
     const len = try reportLength(&keyboard_descriptor, .output, 0);
     try std.testing.expectEqual(@as(usize, 1), len);
 
-    var report = [_]u8{0} ** 1;
+    var report: [1]u8 = @splat(0);
     // Num Lock is usage 1, so element zero; Caps Lock is usage 2, element one.
     try field.insert(&report, 0, 1);
     try field.insert(&report, 2, 1);

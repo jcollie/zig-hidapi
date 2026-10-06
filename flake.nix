@@ -11,7 +11,7 @@
     # Mine, and not the `zon2nix` in nixpkgs, which is a different program
     # taking different options.
     zon2nix = {
-      url = "git+https://git.jcollie.dev/jeff/zon2nix.git?ref=refs/tags/v0.7.3";
+      url = "git+https://git.jcollie.dev/jeff/zon2nix.git?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -31,6 +31,10 @@
         system:
         import nixpkgs {
           inherit system;
+          # nixpkgs marks radicle-node insecure because traffic for a
+          # *private* repository is neither encrypted nor authenticated.
+          # This one is public, and the devshell wants it for `rad push`.
+          config.allowInsecurePredicate = pkg: lib.getName pkg == "radicle-node";
         };
       # Packages and checks are Linux-only: the package builds the test
       # binaries for the virtual machine test, and `pkgs.testers.runNixOSTest`
@@ -89,17 +93,17 @@
               # Wrapped so the Zig it shells out to for `zig env` is the one
               # this project builds with, rather than whatever is on the
               # caller's PATH. Regenerate `build.zig.zon.nix` with:
-              #   zon2nix --16 --nix=build.zig.zon.nix build.zig.zon
+              #   zon2nix --17 --nix=build.zig.zon.nix build.zig.zon
               (pkgs.symlinkJoin {
                 name = "zon2nix";
                 paths = [ zon2nix.packages.${pkgs.stdenv.hostPlatform.system}.zon2nix ];
                 nativeBuildInputs = [ pkgs.makeWrapper ];
                 postBuild = ''
                   wrapProgram $out/bin/zon2nix \
-                    --prefix PATH : ${lib.makeBinPath [ pkgs.zig_0_16 ]}
+                    --prefix PATH : ${lib.makeBinPath [ pkgs.zig_0_17 ]}
                 '';
               })
-              pkgs.zig_0_16
+              pkgs.zig_0_17
             ];
           };
         }

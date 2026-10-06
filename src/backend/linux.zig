@@ -7,7 +7,7 @@
 //!
 //! Every syscall here goes through `std.os.linux` rather than through libc, so
 //! a Linux build of this library links no C at all. That is not true of the
-//! other backends -- Zig 0.16 ships no raw-syscall layer for FreeBSD or Darwin
+//! other backends -- Zig 0.17 ships no raw-syscall layer for FreeBSD or Darwin
 //! and Windows has none to ship -- which is why the choice belongs to the
 //! backend and not to the library.
 //!

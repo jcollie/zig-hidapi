@@ -30,7 +30,7 @@
 //! instead, by way of `kIOHIDRequestTimeoutKey`, so that a wedged device
 //! cannot hold a task forever.
 //!
-//! Zig 0.16 ships no raw-syscall layer for Darwin, so this backend links libc,
+//! Zig 0.17 ships no raw-syscall layer for Darwin, so this backend links libc,
 //! and it links the IOKit and CoreFoundation frameworks. Neither is needed to
 //! *compile* it, which is what lets `zig build check` build this file on a
 //! Linux machine with no macOS SDK -- the only coverage it has until it runs
@@ -236,7 +236,7 @@ pub const Device = struct {
         }
 
         var mode_buf: [64]u8 = undefined;
-        const mode_name = std.fmt.bufPrintZ(&mode_buf, "zig-hidapi-{d}", .{entry_id}) catch
+        const mode_name = std.mem.printSentinel(&mode_buf, "zig-hidapi-{d}", .{entry_id}, 0) catch
             return error.DeviceRefused;
         const mode = key(mode_name);
         if (mode == null) return error.SystemResources;

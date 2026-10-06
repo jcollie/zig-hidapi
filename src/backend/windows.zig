@@ -673,7 +673,7 @@ pub const Enumerator = struct {
     fn nextPath(self: *Enumerator) ?[]const u16 {
         if (self.index >= self.list.len) return null;
         const rest = self.list[self.index..];
-        const end = std.mem.indexOfScalar(u16, rest, 0) orelse return null;
+        const end = std.mem.findScalar(u16, rest, 0) orelse return null;
         if (end == 0) return null;
         self.index += end + 1;
         return rest[0..end];

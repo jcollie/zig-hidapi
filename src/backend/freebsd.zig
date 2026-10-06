@@ -21,7 +21,7 @@
 //! therefore sees nothing. That is a real difference in behaviour between the
 //! two systems and is documented as such rather than papered over.
 //!
-//! Zig 0.16 ships no raw-syscall layer for FreeBSD, so everything goes through
+//! Zig 0.17 ships no raw-syscall layer for FreeBSD, so everything goes through
 //! `std.c` and this backend links libc, where the Linux one does not. Nothing
 //! in this file calls libc directly; `std.Io` does it.
 //!

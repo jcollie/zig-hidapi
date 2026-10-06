@@ -101,7 +101,7 @@ pub const Writer = struct {
     pub fn write(self: *Writer, item: Item, data: i64) error{ValueTooWide}!void {
         if (item == .main_collection_end) {
             // The only item that carries no data at all.
-            self.byte(@intFromEnum(item));
+            self.byte(@backingInt(item));
             return;
         }
 
@@ -122,7 +122,7 @@ pub const Writer = struct {
         };
 
         // 1, 2 and 4 data bytes are encoded as 1, 2 and 3.
-        self.byte(@intFromEnum(item) + if (width == 4) @as(u8, 3) else width);
+        self.byte(@backingInt(item) + if (width == 4) @as(u8, 3) else width);
         const bits: u32 = @truncate(@as(u64, @bitCast(data)));
         for (0..width) |i| self.byte(@truncate(bits >> @intCast(i * 8)));
     }

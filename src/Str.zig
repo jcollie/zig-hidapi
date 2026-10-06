@@ -88,12 +88,14 @@ test "truncation is recorded rather than hidden" {
     const short: Str = .init("abc");
     try std.testing.expect(!short.truncated);
 
-    const long: Str = .init("x" ** (max_len + 10));
+    const text: [max_len + 10]u8 = @splat('x');
+    const long: Str = .init(&text);
     try std.testing.expect(long.truncated);
     try std.testing.expectEqual(@as(usize, max_len), long.slice().?.len);
 
     // Exactly the limit is not truncation.
-    const exact: Str = .init("y" ** max_len);
+    const limit: [max_len]u8 = @splat('y');
+    const exact: Str = .init(&limit);
     try std.testing.expect(!exact.truncated);
 }
 

@@ -3,7 +3,7 @@
 
 //! CoreFoundation, declared rather than imported.
 //!
-//! Zig 0.16 has no CoreFoundation bindings and `@cImport` would need the macOS
+//! Zig 0.17 has no CoreFoundation bindings and `@cImport` would need the macOS
 //! SDK, which would stop this library from being compiled for macOS anywhere
 //! but on a Mac. Writing the declarations out keeps `zig build check` able to
 //! compile this backend from a Linux machine, which is the only coverage it

@@ -85,7 +85,7 @@ pub fn build(b: *std.Build) void {
 
     const run_hidinfo = b.addRunArtifact(hidinfo);
     run_hidinfo.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run_hidinfo.addArgs(args);
+    run_hidinfo.addPassthruArgs();
     const run_step = b.step("run", "Build and run hidinfo");
     run_step.dependOn(&run_hidinfo.step);
 
@@ -132,15 +132,16 @@ pub fn build(b: *std.Build) void {
                     // Always built for the machine running the build, never
                     // for whatever `-Dtarget` the library is being built for.
                     .target = b.graph.host,
-                    .optimize = .Debug,
+                    .optimize = .debug,
                 },
             ),
         },
     );
 
     const run_docs_server = b.addRunArtifact(docs_server);
-    run_docs_server.step.dependOn(&install_docs.step);
-    run_docs_server.addArg(b.getInstallPath(.prefix, "docs"));
+    // Serves the generated directory rather than the installed copy: the
+    // install path cannot be asked for while the build is being configured.
+    run_docs_server.addDirectoryArg(docs_obj.getEmittedDocs());
     run_docs_server.addArg(b.fmt("{d}", .{docs_port}));
     // The server runs until interrupted, so its output has to reach the
     // terminal rather than being captured by the build runner.
@@ -165,7 +166,7 @@ pub fn build(b: *std.Build) void {
     // running it again under ReleaseSafe and ReleaseFast would test the same
     // binary a second and third time. CI runs the suite in all three modes and
     // this keeps the two release runs to the library itself.
-    if (optimize == .Debug) {
+    if (optimize == .debug) {
         const docs_server_tests = b.addTest(
             .{
                 .root_module = docs_server.root_module,
@@ -190,12 +191,12 @@ pub fn build(b: *std.Build) void {
 fn configure(b: *std.Build, module: *std.Build.Module, link: bool) void {
     switch (module.resolved_target.?.result.os.tag) {
         // Every syscall goes through `std.os.linux`, so a Linux build links
-        // no C at all. The other backends will not have that luxury: Zig 0.16
+        // no C at all. The other backends will not have that luxury: Zig 0.17
         // ships no raw-syscall layer for FreeBSD or Darwin, and Windows has
         // none to ship.
         .linux => {},
 
-        // Zig 0.16 ships no raw-syscall layer for FreeBSD -- `std/os/` has
+        // Zig 0.17 ships no raw-syscall layer for FreeBSD -- `std/os/` has
         // linux, windows, plan9, uefi and wasi and nothing else -- so every
         // syscall goes through `std.c` and this target has to link libc.
         // Nothing in the backend calls libc directly; `std.Io` does.

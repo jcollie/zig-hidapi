@@ -246,7 +246,7 @@ pub fn Device(comptime requests: Requests, comptime scope: @TypeOf(.enum_literal
             // The POSIX arm hands back what `ioctl` returned, with a negative
             // value carrying the negated `errno`.
             if (result.device_io_control < 0) {
-                return mapErrno(log, what, @enumFromInt(-result.device_io_control));
+                return mapErrno(log, what, @fromBackingInt(@as(u16, @intCast(-result.device_io_control))));
             }
             return @intCast(result.device_io_control);
         }

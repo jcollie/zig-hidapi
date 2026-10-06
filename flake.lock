@@ -2,11 +2,11 @@
   "nodes": {
     "nixpkgs": {
       "locked": {
-        "lastModified": 1787814960,
-        "narHash": "sha256-4Opnii0iGg8Dk8/rZ2IYh/HCHvg1B+Us5+Qg+Qy5c18=",
-        "rev": "c27cdad491a991b11ed731760aa2ef8db0cb0410",
+        "lastModified": 1791191277,
+        "narHash": "sha256-R4B+RRYmze9htmPZ8xeF19mchTSH99GdaqanKCW8CF8=",
+        "rev": "aa48d347080940b8a2b8d2f48228674e280a3514",
         "type": "tarball",
-        "url": "https://releases.nixos.org/nixpkgs/nixpkgs-26.11pre1062790.c27cdad491a9/nixexprs.tar.zst"
+        "url": "https://releases.nixos.org/nixpkgs/nixpkgs-26.11pre1085827.aa48d3470809/nixexprs.tar.zst"
       },
       "original": {
         "type": "tarball",
@@ -26,16 +26,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1789871875,
-        "narHash": "sha256-7K6x94uIruWa1urNX17HYJdZYzHZVveCL9ogNIlP1J4=",
-        "ref": "refs/tags/v0.7.3",
-        "rev": "da08185dee3ba5faeba6920bacd32b21fc3a595e",
-        "revCount": 527,
+        "lastModified": 1791261699,
+        "narHash": "sha256-Y1s36Ny116/8wZNgZj8dOez3qJqA/QpnCfaVs2kuNC8=",
+        "ref": "main",
+        "rev": "5efe627e5901a73a8b707f797d08f2835ab59ac2",
+        "revCount": 559,
         "type": "git",
         "url": "https://git.jcollie.dev/jeff/zon2nix.git"
       },
       "original": {
-        "ref": "refs/tags/v0.7.3",
+        "ref": "main",
         "type": "git",
         "url": "https://git.jcollie.dev/jeff/zon2nix.git"
       }

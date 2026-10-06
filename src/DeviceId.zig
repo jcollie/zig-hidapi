@@ -106,8 +106,8 @@ test "a Windows interface path fits with room to spare" {
 }
 
 test "too long is an error rather than a truncation" {
-    const long = "x" ** (max_len + 1);
-    try std.testing.expectError(error.DeviceIdTooLong, DeviceId.init(long));
+    const long: [max_len + 1]u8 = @splat('x');
+    try std.testing.expectError(error.DeviceIdTooLong, DeviceId.init(&long));
 }
 
 test "the empty id compares unequal to a real one" {

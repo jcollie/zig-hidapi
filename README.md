@@ -11,7 +11,7 @@ the C [hidapi](https://github.com/libusb/hidapi) library.
 On Linux and FreeBSD it issues the `HIDIOC*` ioctls directly against
 `/dev/hidraw*`, and on Linux it reads `/sys/class/hidraw` for everything that
 can be learned without opening a device, so a Linux build links no C at all.
-It is built on Zig 0.16's `std.Io`
+It is built on Zig 0.17's `std.Io`
 interface, so every blocking operation is dispatched through the caller's I/O
 implementation rather than blocking a thread outright, and it allocates
 nothing: every buffer it needs is one the caller supplies.
@@ -92,7 +92,7 @@ Two Windows limitations are worth knowing before you rely on them:
 
 ## Requirements
 
-- Zig 0.16
+- Zig 0.17
 - Linux with the `hidraw` driver (`CONFIG_HIDRAW`), i.e. `/dev/hidraw*` present
 - or FreeBSD 13 or later with `hidraw(4)` attached — the default from 14.2,
   and before that `hw.usb.usbhid.enable=1` in `/boot/loader.conf` together with
@@ -531,7 +531,7 @@ authorizes changes to `main`.
 
 ## Development
 
-A Nix flake provides the toolchain (Zig 0.16, `reuse`, `pinact`,
+A Nix flake provides the toolchain (Zig 0.17, `reuse`, `pinact`,
 `git-pages-cli`, and the `rad` CLI):
 
 ```sh
@@ -559,7 +559,7 @@ fetching, which is how CI compiles them with no network.
 removing or updating a dependency means regenerating it:
 
 ```sh
-nix develop -c zon2nix --16 --nix=build.zig.zon.nix build.zig.zon
+nix develop -c zon2nix --17 --nix=build.zig.zon.nix build.zig.zon
 ```
 
 Mind that the output flags name the file to *write*: `zon2nix --txt
@@ -655,8 +655,8 @@ because they document behaviour no specification does.
   requests, which is what justifies issuing those directly.
 - winsdk-10. *hidclass.h (Windows Driver Kit)*.
   <https://github.com/tpn/winsdk-10/blob/master/Include/10.0.14393.0/shared/hidclass.h>
-- The Zig Software Foundation. *Zig 0.16.0 Release Notes*.
-  <https://ziglang.org/download/0.16.0/release-notes.html>
+- The Zig Software Foundation. *Zig 0.17.0 Release Notes*.
+  <https://ziglang.org/download/0.17.0/release-notes.html>
 
 ## License
 

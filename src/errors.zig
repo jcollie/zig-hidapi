@@ -109,10 +109,10 @@ test "the per-operation sets are all subsets of AnyError" {
     // does not name, and a caller switching exhaustively on `AnyError` would
     // silently stop seeing it.
     inline for (.{ OpenError, EnumerateError, ReadError, WriteError, ReportError, DescriptorError }) |Set| {
-        inline for (@typeInfo(Set).error_set.?) |e| {
+        inline for (@typeInfo(Set).error_set.error_names.?) |name| {
             // Coercing rather than merely naming it is what makes this a
             // check: an error `AnyError` does not hold fails to coerce.
-            const member: AnyError = @field(anyerror, e.name);
+            const member: AnyError = @field(anyerror, name);
             _ = member catch {};
         }
     }

@@ -15,17 +15,17 @@
   lib,
   stdenv,
   callPackage,
-  zig_0_16,
+  zig_0_17,
 }:
 let
   # Generated from build.zig.zon by zon2nix; regenerate with
-  #   nix develop -c zon2nix --16 --nix=build.zig.zon.nix build.zig.zon
+  #   nix develop -c zon2nix --17 --nix=build.zig.zon.nix build.zig.zon
   zigDeps = callPackage ./build.zig.zon.nix { };
 in
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "zig-hidapi-tests";
-  version = "0.0.3";
+  version = "0.0.4";
 
   src = lib.fileset.toSource {
     root = ./.;
@@ -39,7 +39,7 @@ stdenv.mkDerivation (finalAttrs: {
     ];
   };
 
-  nativeBuildInputs = [ zig_0_16 ];
+  nativeBuildInputs = [ zig_0_17 ];
 
   # `test-exe` installs the test binaries; the default step would install
   # nothing beyond `hidinfo`, and the virtual machine test wants the tests.

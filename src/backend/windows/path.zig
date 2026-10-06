@@ -63,7 +63,7 @@ pub fn parse(path: []const u8) Fields {
 }
 
 fn hexAfter(comptime T: type, haystack: []const u8, needle: []const u8, digits: usize) ?T {
-    const at = std.ascii.indexOfIgnoreCase(haystack, needle) orelse return null;
+    const at = std.ascii.findIgnoreCase(haystack, needle) orelse return null;
     const start = at + needle.len;
     if (start + digits > haystack.len) return null;
     return std.fmt.parseInt(T, haystack[start..][0..digits], 16) catch null;
@@ -74,7 +74,7 @@ fn hexAfter(comptime T: type, haystack: []const u8, needle: []const u8, digits: 
 pub fn instanceId(path: []const u8, buf: []u8) ?[]const u8 {
     const body = if (std.mem.startsWith(u8, path, "\\\\?\\")) path[4..] else path;
     // Drop the interface class GUID, which is the last `#`-separated field.
-    const last = std.mem.lastIndexOfScalar(u8, body, '#') orelse return null;
+    const last = std.mem.findScalarLast(u8, body, '#') orelse return null;
     const id = body[0..last];
     if (id.len > buf.len) return null;
     for (id, 0..) |c, i| buf[i] = if (c == '#') '\\' else c;

@@ -56,7 +56,7 @@ pub fn parseUevent(text: []const u8) Uevent {
     var result: Uevent = .{};
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |line| {
-        const eq = std.mem.indexOfScalar(u8, line, '=') orelse continue;
+        const eq = std.mem.findScalar(u8, line, '=') orelse continue;
         const key = line[0..eq];
         const value = line[eq + 1 ..];
         if (std.mem.eql(u8, key, "HID_ID")) {

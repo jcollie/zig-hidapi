@@ -89,7 +89,7 @@ pub const hidraw_devinfo = extern struct {
     /// Zero is not one of the `BUS_*` values, which only a non-exhaustive
     /// `BUS` can represent; a device that answers always overwrites it.
     pub const init: hidraw_devinfo = .{
-        .bustype = @enumFromInt(0),
+        .bustype = @fromBackingInt(0),
         .vendor = 0,
         .product = 0,
     };

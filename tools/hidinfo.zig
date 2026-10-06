@@ -207,7 +207,7 @@ fn fields(w: *std.Io.Writer, bytes: []const u8) !void {
     }) |field| {
         // One heading per report, since a device's reports are laid out
         // independently of each other.
-        const key = (@as(u32, @intFromEnum(field.kind)) << 8) | field.report_id;
+        const key = (@as(u32, @backingInt(field.kind)) << 8) | field.report_id;
         if (last_key != key) {
             last_key = key;
             try w.print("  {f} report", .{field.kind});

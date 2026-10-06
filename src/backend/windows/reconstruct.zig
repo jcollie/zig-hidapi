@@ -555,7 +555,7 @@ fn insertReportItems(b: *Builder) Error!void {
             var list_node = searchForBitPosition(
                 coll_begin,
                 first_bit,
-                @enumFromInt(@as(u8, @intCast(rt))),
+                @fromBackingInt(@as(u8, @intCast(rt))),
                 cap.report_id,
             );
 
@@ -565,7 +565,7 @@ fn insertReportItems(b: *Builder) Error!void {
                 .type_of_node = .cap,
                 .caps_index = caps_index,
                 .collection_index = cap.link_collection,
-                .main_item_type = @enumFromInt(@as(u8, @intCast(rt))),
+                .main_item_type = @fromBackingInt(@as(u8, @intCast(rt))),
                 .report_id = cap.report_id,
             };
 
@@ -629,7 +629,7 @@ fn insertPadding(b: *Builder) Error!void {
         while (maybe) |node| {
             if (node.next == null) break;
             if (node.main_item_type.isReportItem() and node.first_bit != -1) {
-                const rt = @intFromEnum(node.main_item_type);
+                const rt = @backingInt(node.main_item_type);
                 const slot = b.report_ids.slot[node.report_id];
                 if (slot != ReportIds.none) {
                     const i = at(rt, slot, @max(slots, 1));
@@ -684,7 +684,7 @@ fn insertPadding(b: *Builder) Error!void {
                 .type_of_node = .padding,
                 .caps_index = -1,
                 .collection_index = 0,
-                .main_item_type = @enumFromInt(@as(u8, @intCast(rt))),
+                .main_item_type = @fromBackingInt(@as(u8, @intCast(rt))),
                 .report_id = id,
             });
             if (after == node_before_top_level_end) node_before_top_level_end = after.next;
@@ -711,7 +711,7 @@ fn insertPadding(b: *Builder) Error!void {
                 .type_of_node = .padding,
                 .caps_index = -1,
                 .collection_index = 0,
-                .main_item_type = @enumFromInt(@as(u8, @intCast(rt))),
+                .main_item_type = @fromBackingInt(@as(u8, @intCast(rt))),
                 .report_id = 0,
             });
         }
@@ -741,7 +741,7 @@ fn encode(b: *Builder, w: *item.Writer) Error!void {
 
     var maybe = b.list.head;
     while (maybe) |node| : (maybe = node.next) {
-        const rt: usize = @intFromEnum(node.main_item_type);
+        const rt: usize = @backingInt(node.main_item_type);
         const caps_index = node.caps_index;
 
         switch (node.main_item_type) {
@@ -939,7 +939,7 @@ fn encode(b: *Builder, w: *item.Writer) Error!void {
 /// item with a larger report count.
 fn runsInto(b: *Builder, node: *Node, cap: Cap, rt: usize, button: bool) Error!bool {
     const next = node.next orelse return false;
-    if (@intFromEnum(next.main_item_type) != rt) return false;
+    if (@backingInt(next.main_item_type) != rt) return false;
     if (next.type_of_node != .cap) return false;
 
     const other = try b.capAt(next.caps_index);
@@ -1205,11 +1205,11 @@ test "a gap between fields becomes constant padding" {
 
     // A constant input item -- 0x81 0x03 -- has to appear between the two
     // data items, or the second field would be read from the wrong bits.
-    try std.testing.expect(std.mem.indexOf(u8, bytes, &.{ 0x81, 0x03 }) != null);
+    try std.testing.expect(std.mem.find(u8, bytes, &.{ 0x81, 0x03 }) != null);
 
-    const first_data = std.mem.indexOf(u8, bytes, &.{ 0x81, 0x02 }).?;
-    const padding = std.mem.indexOf(u8, bytes, &.{ 0x81, 0x03 }).?;
-    const second_data = std.mem.lastIndexOf(u8, bytes, &.{ 0x81, 0x02 }).?;
+    const first_data = std.mem.find(u8, bytes, &.{ 0x81, 0x02 }).?;
+    const padding = std.mem.find(u8, bytes, &.{ 0x81, 0x03 }).?;
+    const second_data = std.mem.findLast(u8, bytes, &.{ 0x81, 0x02 }).?;
     try std.testing.expect(first_data < padding);
     try std.testing.expect(padding < second_data);
 }

@@ -197,7 +197,7 @@ pub const VirtualDevice = struct {
         defer std.heap.page_allocator.free(event);
         @memset(event, 0);
 
-        put(event, u32, off.kind, @intFromEnum(EventType.create2));
+        put(event, u32, off.kind, @backingInt(EventType.create2));
         putStr(event, off.create_name, 128, spec.name);
         putStr(event, off.create_phys, 64, spec.phys);
         putStr(event, off.create_uniq, 64, spec.uniq);
@@ -216,7 +216,7 @@ pub const VirtualDevice = struct {
     /// Remove the device and close the descriptor.
     pub fn destroy(self: *VirtualDevice) void {
         var event: [8]u8 = @splat(0);
-        put(&event, u32, off.kind, @intFromEnum(EventType.destroy));
+        put(&event, u32, off.kind, @backingInt(EventType.destroy));
         writeAll(self.fd, &event) catch {};
         _ = linux.close(self.fd);
         self.fd = -1;
@@ -229,7 +229,7 @@ pub const VirtualDevice = struct {
         const event = try std.heap.page_allocator.alloc(u8, off.input_data + report.len);
         defer std.heap.page_allocator.free(event);
         @memset(event, 0);
-        put(event, u32, off.kind, @intFromEnum(EventType.input2));
+        put(event, u32, off.kind, @backingInt(EventType.input2));
         put(event, u16, off.input_size, @intCast(report.len));
         @memcpy(event[off.input_data..][0..report.len], report);
         try writeAll(self.fd, event);
@@ -251,7 +251,7 @@ pub const VirtualDevice = struct {
             else => return error.UhidReadFailed,
         }
 
-        const kind: EventType = @enumFromInt(get(&event, u32, off.kind));
+        const kind: EventType = @fromBackingInt(get(&event, u32, off.kind));
         switch (kind) {
             .open => self.opened = true,
             .close => self.opened = false,
@@ -261,7 +261,7 @@ pub const VirtualDevice = struct {
                 const rnum = event[off.get_rnum];
 
                 var reply: [event_size]u8 = @splat(0);
-                put(&reply, u32, off.kind, @intFromEnum(EventType.get_report_reply));
+                put(&reply, u32, off.kind, @backingInt(EventType.get_report_reply));
                 put(&reply, u32, off.get_reply_id, id);
                 put(&reply, u16, off.get_reply_err, 0);
                 // The report ID leads, exactly as it does everywhere else in
@@ -284,7 +284,7 @@ pub const VirtualDevice = struct {
                 );
 
                 var reply: [16]u8 = @splat(0);
-                put(&reply, u32, off.kind, @intFromEnum(EventType.set_report_reply));
+                put(&reply, u32, off.kind, @backingInt(EventType.set_report_reply));
                 put(&reply, u32, off.set_reply_id, id);
                 put(&reply, u16, off.set_reply_err, 0);
                 try writeAll(self.fd, reply[0 .. off.set_reply_err + 2]);
